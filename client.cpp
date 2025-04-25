@@ -9,6 +9,8 @@
 
 using namespace std;
 
+#define STDIN_BUF_SIZE 100
+
 class Client {
     private:
         const int tcp_socket;
@@ -17,6 +19,40 @@ class Client {
 
         struct pollfd poll_fds[2];
         int poll_cnt = 0;
+
+        void handle_stdin() {
+            char buffer[STDIN_BUF_SIZE];
+            scanf("%s", buffer);
+
+            if ( strcmp(buffer, "exit") == 0 ) {
+                close(tcp_socket);
+                exit(0);
+            }
+
+            client_packet packet;
+            char topic[STDIN_BUF_SIZE];
+            scanf("%s", topic);
+
+            if ( strcmp(buffer, "subscribe") == 0 ) {
+                packet.type = CLIENT_SUBSCRIBE_TYPE;
+                printf("Subscribed to topic %s\n", topic);
+            } else if ( strcmp(buffer, "unsubscribe") == 0 ) {
+                printf("Unsubscribed from topic %s\n", topic);
+                packet.type = CLIENT_UNSUBSCRIBE_TYPE;
+            } else {
+                perror("Invalid command\n");
+                return;
+            }
+            packet.len = strlen(topic) + 1;
+            memcpy(packet.data, topic, packet.len);
+            packet.data[packet.len] = '\0';
+            int bytes_sent = send(tcp_socket, &packet, sizeof(packet), 0);
+            if ( bytes_sent != sizeof(packet) ) {
+                perror("TCP send failed -> Handling stdin failed miserably\n");
+                exit(1);
+            }
+
+        }
 
     public:
         Client(const char* name, const char* ip, int port)
@@ -52,7 +88,7 @@ class Client {
             memcpy(packet.data, id, packet.len);
 
             int bytes_sent = send(tcp_socket, &packet, sizeof(packet), 0);
-            
+
             if ( bytes_sent != sizeof(packet) ) {
                 printf("TCP send failed, sent %d bytes\n", bytes_sent);
                 exit(1);
@@ -87,10 +123,7 @@ class Client {
                             buffer[bytes_received] = '\0';
                             printf("Received: %s\n", buffer);
                         } else if ( poll_fds[i].fd == fileno(stdin) ) {
-                            char buffer[1024];
-                            fgets(buffer, sizeof(buffer), stdin);
-
-                            printf("Got the command: %s\n", buffer);
+                            handle_stdin();
                         }
                     }
                     if ( poll_fds[i].revents & POLLHUP ) {
@@ -112,6 +145,7 @@ int main(int argc, char* argv[]) {
         printf("./client [name] [ip] [port]\n");
         return 1;
     }
+    setvbuf(stdout, NULL, _IONBF, BUFSIZ);
     Client client(argv[1], argv[2], atoi(argv[3]));
     client.start();
 }
