@@ -1,4 +1,5 @@
 #include <cstdlib>
+#include <ostream>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -8,7 +9,9 @@
 #include <unistd.h>
 #include <poll.h>
 #include <string.h>
-#include <termios.h>
+#include <ostream>
+#include "comms.h"
+
 
 using namespace std;
 
@@ -37,6 +40,21 @@ class Server {
                 return;
             }
 
+            client_packet packet;
+            recv(client_socket, &packet, sizeof(packet), 0);
+            if ( packet.type != CLIENT_ID_TYPE ) {
+                printf("Invalid packet type: %d\n", packet.type);
+                close(client_socket);
+                return;
+            }
+
+            char id[11];
+            memcpy(id, packet.data, packet.len);
+
+            printf("New client %s connected from %s:%d.\n", id, inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
+            // Why ? Checker loves it
+            fflush(stdout);
+            
             poll_fds[poll_cnt].fd = client_socket;
             poll_fds[poll_cnt].events = POLLIN;
             poll_cnt++;
@@ -70,8 +88,19 @@ class Server {
             buffer[bytes_received] = '\0';
 
             if ( strcmp(buffer, "exit\n") == 0 ) {
+                // Also close all clients!
+                leave_me_alone();
                 exit(0);
             }
+        }
+
+        void leave_me_alone() {
+            for ( int i = 0; i < poll_cnt; i++ ) {
+                if ( poll_fds[i].fd != tcp_socket && poll_fds[i].fd != udp_socket ) {
+                    close(poll_fds[i].fd);
+                }
+            }
+            poll_cnt = 2;
         }
 
     public:
@@ -85,6 +114,13 @@ class Server {
             server_addr.sin_addr.s_addr = INADDR_ANY;
             server_addr.sin_port = htons(port);
 
+            // Make ports reusable, in case we run this really fast two times in a row
+            int enable = 1;
+            if (setsockopt(udp_socket, SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(int)) < 0)
+                perror("setsockopt(SO_REUSEADDR) failed UDP\n");
+            if (setsockopt(tcp_socket, SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(int)) < 0)
+                perror("setsockopt(SO_REUSEADDR) failed TCP\n");
+
             int ret;
             ret = bind(udp_socket, (struct sockaddr*)&server_addr, sizeof(server_addr));
             if ( ret < 0 ) {
@@ -96,6 +132,7 @@ class Server {
                 perror("TCP bind failed\n");
                 exit(1);
             }
+
 
             listen(tcp_socket, MAX_INCOMING_CONNECTIONS);
 
@@ -114,7 +151,8 @@ class Server {
         void start() {
             int ret;
 
-            printf("Server started on port %d\n", port);
+            // printf("Server started on port %d\n", port);
+            // fflush(stdout);
 
             while(1) {
 
