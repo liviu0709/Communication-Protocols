@@ -1,7 +1,10 @@
+#include <cstdint>
 #include <cstdlib>
 #include <ostream>
+#include <string>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <cmath>
 #include <arpa/inet.h>
 #include <cstdio>
 #include <cstdlib>
@@ -12,6 +15,7 @@
 #include <ostream>
 #include <unordered_map>
 #include <vector>
+#include <netinet/tcp.h>
 #include "comms.h"
 
 
@@ -19,34 +23,13 @@ using namespace std;
 
 #define MAX_INCOMING_CONNECTIONS 10
 #define MAX_CONNECTIONS 100
-#define MAX_UDP_MESSAGE_SIZE 1800
 #define STDIN_BUF_SIZE 50
+#define INT 0
+#define SHORT_REAL 1
+#define FLOAT 2
+#define STRING 3
 
-class Message {
-    private:
-        struct sockaddr_in addr_src;
-        string topic;
-        int data_type;
-        char payload[1500];
-        int payload_len;
-
-    public:
-        Message() {
-            memset(&addr_src, 0, sizeof(addr_src));
-            topic = "";
-            data_type = 0;
-            memset(payload, 0, sizeof(payload));
-            payload_len = 0;
-        }
-
-        Message(struct sockaddr_in addr_src, string topic, int data_type, char* payload, int payload_len) {
-            this->addr_src = addr_src;
-            this->topic = topic;
-            this->data_type = data_type;
-            memcpy(this->payload, payload, payload_len);
-            this->payload_len = payload_len;
-        }
-};
+FILE *debug = fopen("debug.txt", "w");
 
 class ClientInfo {
     private:
@@ -81,6 +64,169 @@ class ClientInfo {
             }
             return -1;
         }
+
+        vector<string> get_topics() {
+            return topics;
+        }
+
+        int get_socket() {
+            return socket;
+        }
+};
+
+class Message {
+    private:
+        struct sockaddr_in addr_src;
+        string topic;
+        unsigned int data_type;
+        string type;
+        string text;
+        bool recognized;
+        char send_buffer[MAX_UDP_MESSAGE_SIZE];
+        int send_buffer_len;
+
+    public:
+        Message() {
+            memset(&addr_src, 0, sizeof(addr_src));
+            topic = "";
+            data_type = 0;
+            recognized = false;
+        }
+
+        Message(struct sockaddr_in addr_src, char* raw_data, int raw_data_len) {
+            this->addr_src = addr_src;
+
+            // Topic field is always 50 bytes
+            topic = string(raw_data, 50);
+            // Trim the topic string to stop at the first '\0'
+            size_t null_pos = topic.find('\0');
+            if (null_pos != std::string::npos) {
+                topic.resize(null_pos + 1); // Resize the string to exclude everything after '\0'
+            } else {
+                topic.resize(51);
+                topic[50] = '\0';
+            }
+
+            fprintf(debug, "Topic: %s. Len: %lu\n", topic.c_str(), topic.length());
+
+            // Data type is 1 byte
+            memset(&data_type, 0, sizeof(data_type));
+            memcpy((char*)&data_type, raw_data + 50, 1);
+
+            switch(data_type) {
+                case INT: {
+                    // Sign byte
+                    char sign = *(raw_data + 51);
+                    uint32_t num;
+                    memcpy((char*)&num, raw_data + 52, sizeof(num));
+                    num = ntohl(num);
+                    if ( sign == 0) {
+                        // Positive
+                        text = to_string(num);
+                    } else {
+                        // Negative
+                        text = to_string(-1 * (int32_t)num);
+                    }
+                    type = "INT";
+                    recognized = true;
+                    break;
+                }
+                case SHORT_REAL: {
+                    uint16_t num;
+                    memcpy((char*)&num, raw_data + 51, sizeof(num));
+                    num = ntohs(num);
+                    if ( num % 100 > 9 ) {
+                        text = to_string(num / 100 ) + "." + to_string(num % 100);
+                    } else {
+                        text = to_string(num / 100 ) + ".0" + to_string(num % 100);
+                    }
+                    type = "SHORT_REAL";
+                    recognized = true;
+                    break;
+                }
+                case FLOAT: {
+                    char sign = *(raw_data + 51);
+                    uint32_t num;
+                    memcpy((char*)&num, raw_data + 52, sizeof(num));
+                    num = ntohl(num);
+                    uint8_t decimal_places = *(raw_data + 56);
+                    if ( sign )
+                        text = "-";
+                    else
+                        text = "";
+                    string int_num = to_string(num);
+                    if ( int_num.length() > decimal_places ) {
+                        if ( decimal_places == 0 ) {
+                            text += int_num;
+                        } else {
+                            text += int_num.substr(0, int_num.length() - decimal_places) + "." + int_num.substr(int_num.length() - decimal_places);
+                        }
+                    } else {
+                        text += "0." + string(decimal_places - int_num.length(), '0') + int_num;
+                    }
+                    type = "FLOAT";
+                    recognized = true;
+                    break;
+                }
+                case STRING: {
+                    text = string(raw_data + 51, raw_data_len - 51);
+                    type = "STRING";
+                    recognized = true;
+                    break;
+                }
+                default:
+                fprintf(stderr, "Unknown data type: %d\n", data_type);
+                recognized = false;
+                return;
+            }
+            send_buffer_len = sprintf(send_buffer, "%s:%d - %s - %s - %s\n", inet_ntoa(addr_src.sin_addr),
+            ntohs(addr_src.sin_port), topic.c_str(), type.c_str(), text.c_str());
+        }
+
+        void notify_subs(unordered_map<string, vector<string>> subs, unordered_map<string, ClientInfo> &clients) {
+            // printf("Notifying subscribers... for %s\n", topic.c_str());
+            // for (const auto& [topic, subscribers] : subs) {
+            // //     // Print the topic
+                // printf("Topic from tcp: %lu.", topic.length());
+                // cout << topic << endl;
+            //     if (topic == this->topic) {
+            //         cout << "Match found for topic: " << topic << endl;
+            //     }
+            //     if (topic == "a_negative_int") {
+            //         cout << "Match found for hardcoded key: a_negative_int" << endl;
+            //     }
+
+            //     // Print all subscribers for the topic
+            //     cout << "Subscribers: ";
+            //     for (const auto& subscriber : subscribers) {
+            //         cout << subscriber << " -> strcmp " << strcmp(this->topic.c_str(), topic.c_str()) << " ";
+            //     }
+            //     cout << endl;
+            // }
+            // printf("Topic from udp: %lu.\n", topic.length());
+
+            if ( subs.count(topic) == 0 ) {
+                return;
+            }
+            // printf("Notifying subscribers found\n");
+            for ( auto sub : subs[topic] ) {
+                memmove(send_buffer + 4, send_buffer, send_buffer_len);
+                memcpy(send_buffer, &send_buffer_len, 4);
+                int bytes_sent = 0;
+                while ( bytes_sent != send_buffer_len + sizeof(send_buffer_len) ) {
+                    int rc = send(clients[sub].get_socket(), send_buffer, send_buffer_len + sizeof(send_buffer_len), 0);
+                    if ( rc < 0 ) {
+                        perror("TCP send failed\n");
+                        return;
+                    }
+                    if ( rc == 0 ) {
+                        fprintf(stderr, "Client refuses to talk to us\n");
+                        return;
+                    }
+                    bytes_sent += rc;
+                }
+            }
+        }
 };
 
 class Server {
@@ -98,14 +244,43 @@ class Server {
         // Topic -> Subscribers
         unordered_map<string, vector<string>> topics;
 
+        void disconnect_client(int fd) {
+            printf("Client %s disconnected.\n", clients_by_fd[fd].c_str());
+            fprintf(debug, "Client %s disconnected.\n", clients_by_fd[fd].c_str());
+            for ( int i = 0 ; i < clients[clients_by_fd[fd]].get_topics().size(); i++ ) {
+                auto &subs = topics[clients[clients_by_fd[fd]].get_topics()[i]];
+                for ( int j = 0; j < subs.size(); j++ ) {
+                    if ( subs[j] == clients_by_fd[fd] ) {
+                        subs.erase(subs.begin() + j);
+                        break;
+                    }
+                }
+                if ( subs.size() == 0 ) {
+                    topics.erase(clients[clients_by_fd[fd]].get_topics()[i]);
+                }
+            }
+            close(fd);
+            clients.erase(clients_by_fd[fd]);
+            clients_by_fd.erase(fd);
+            poll_cnt--;
+        }
+
         void handle_subs(int fd) {
-            printf("GOING TO HANDLE SHIT\n");
+            // printf("GOING TO HANDLE SHIT\n");
             // Infinity loop when client disconnects
             client_packet packet;
-            int bytes_received = recv(fd, &packet, sizeof(packet), 0);
-            if ( bytes_received < 0 ) {
-                perror("TCP receive failed\n");
-                return;
+            int bytes_received = 0;
+            while ( bytes_received != sizeof(packet) ) {
+                int rc = recv(fd, &packet, sizeof(packet), 0);
+                if ( rc < 0 ) {
+                    perror("TCP receive failed\n");
+                    return;
+                }
+                if ( rc == 0 ) {
+                    disconnect_client(fd);
+                    return;
+                }
+                bytes_received += rc;
             }
             if ( packet.len <= 0 ) {
                 perror("Invalid packet length\n");
@@ -121,8 +296,8 @@ class Server {
                     topics[topic].push_back(clients_by_fd[fd]);
                     clients[clients_by_fd[fd]].add_topic(topic);
 
-                    printf("Client %s subscribed to topic %s\n", clients_by_fd[fd].c_str(), topic.c_str());
-                    printf("Topic %s has %ld subscribers\n", topic.c_str(), topics[topic].size());
+                    fprintf(debug, "Client %s subscribed to topic %s\n", clients_by_fd[fd].c_str(), topic.c_str());
+                    fprintf(debug, "Topic %s has %ld subscribers\n", topic.c_str(), topics[topic].size());
                     break;
                 }
                 case CLIENT_UNSUBSCRIBE_TYPE: {
@@ -142,8 +317,8 @@ class Server {
                         topics.erase(topic);
                     }
 
-                    printf("Client %s unsubscribed from topic %s\n", clients_by_fd[fd].c_str(), topic.c_str());
-                    printf("Topic %s has %ld subscribers\n", topic.c_str(), topics[topic].size());
+                    fprintf(debug, "Client %s unsubscribed from topic %s\n", clients_by_fd[fd].c_str(), topic.c_str());
+                    fprintf(debug, "Topic %s has %ld subscribers\n", topic.c_str(), topics[topic].size());
                     break;
                 }
             }
@@ -154,17 +329,36 @@ class Server {
             int client_socket;
             struct sockaddr_in client_addr;
             socklen_t addr_len = sizeof(client_addr);
-
+            // printf("Waiting for TCP client...\n");
             client_socket = accept(tcp_socket, (struct sockaddr*)&client_addr, &addr_len);
             if ( client_socket < 0 ) {
                 perror("TCP accept failed\n");
                 return;
             }
 
+            // Disable Nagle's algorithm
+            int enable = 1;
+            if ( setsockopt(client_socket, IPPROTO_TCP, TCP_NODELAY, &enable, sizeof(int)) < 0 )
+                perror("setsockopt(TCP_NODELAY) failed\n");
+
             client_packet packet;
-            recv(client_socket, &packet, sizeof(packet), 0);
+            int bytes_received = 0;
+            while ( bytes_received != sizeof(packet) ) {
+                int rc = recv(client_socket, ((char*)&packet) + bytes_received, sizeof(packet) - bytes_received, 0);
+                fprintf(debug, "Recv from connect: %d\n", rc);
+                if ( rc < 0 ) {
+                    perror("TCP receive failed\n");
+                    return;
+                }
+                if ( rc == 0 ) {
+                    close(client_socket);
+                    return;
+                }
+                bytes_received += rc;
+            }
+            // int rc = recv(client_socket, &packet, sizeof(packet), 0);
             if ( packet.type != CLIENT_ID_TYPE ) {
-                printf("Invalid packet type: %d\n", packet.type);
+                fprintf(debug, "Invalid packet type: %d\n", packet.type);
                 close(client_socket);
                 return;
             }
@@ -174,6 +368,7 @@ class Server {
 
             if ( clients.find(string(id)) != clients.end() ) {
                 printf("Client %s already connected.\n", id);
+                fprintf(debug, "Client %s already connected.\n", id);
                 close(client_socket);
                 return;
             }
@@ -183,6 +378,7 @@ class Server {
             clients_by_fd[client_socket] = string(id);
 
             printf("New client %s connected from %s:%d.\n", id, inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
+            fprintf(debug, "New client %s connected from %s:%d.\n", id, inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
 
             poll_fds[poll_cnt].fd = client_socket;
             poll_fds[poll_cnt].events = POLLIN;
@@ -202,7 +398,8 @@ class Server {
                 return;
             }
 
-            // printf("Received UDP message: %s\n", buffer);
+            Message msg(client_addr, buffer, bytes_received);
+            msg.notify_subs(topics, clients);
         }
 
         void talk_to_myself() {
@@ -250,6 +447,10 @@ class Server {
             if (setsockopt(tcp_socket, SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(int)) < 0)
                 perror("setsockopt(SO_REUSEADDR) failed TCP\n");
 
+            // Disable Nagle's algorithm
+            if (setsockopt(tcp_socket, IPPROTO_TCP, TCP_NODELAY, &enable, sizeof(int)) < 0)
+                perror("setsockopt(TCP_NODELAY) failed\n");
+
             int ret;
             ret = bind(udp_socket, (struct sockaddr*)&server_addr, sizeof(server_addr));
             if ( ret < 0 ) {
@@ -292,6 +493,11 @@ class Server {
                 }
 
                 for ( int i = 0; i < poll_cnt; i++ ) {
+                    // if ( (poll_fds[i].revents & POLLHUP) || (poll_fds[i].revents & POLLERR) ) {
+                    //     disconnect_client(poll_fds[i].fd);
+                    //     break;
+                    // }
+
                     if ( poll_fds[i].revents & POLLIN ) {
                         if ( poll_fds[i].fd == tcp_socket ) {
                             talk_to_tcp_client();
@@ -302,14 +508,9 @@ class Server {
                         } else {
                             handle_subs(poll_fds[i].fd);
                         }
+                    }
 
-                    }
-                    if ( (poll_fds[i].revents & POLLHUP) || (poll_fds[i].revents & POLLERR) ) {
-                        close(poll_fds[i].fd);
-                        clients.erase(clients_by_fd[poll_fds[i].fd]);
-                        clients_by_fd.erase(poll_fds[i].fd);
-                        printf("Client %s disconnected.\n", clients_by_fd[poll_fds[i].fd].c_str());
-                    }
+
                 }
             }
         }
@@ -321,6 +522,7 @@ int main(int argc, char* argv[]) {
         return 1;
     }
     setvbuf(stdout, NULL, _IONBF, BUFSIZ);
+    setvbuf(debug, NULL, _IONBF, 0);
     int port = atoi(argv[1]);
     Server server(port);
     server.start();
