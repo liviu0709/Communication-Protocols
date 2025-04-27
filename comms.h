@@ -1,3 +1,5 @@
+#include <string>
+
 using namespace std;
 
 #define CLIENT_ID_TYPE 1
@@ -9,5 +11,6 @@ using namespace std;
 struct client_packet {
     int type;
     int len;
-    char data[200];
 };
+
+bool match(string wild, string topic);

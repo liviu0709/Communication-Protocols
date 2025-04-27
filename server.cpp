@@ -31,42 +31,66 @@ using namespace std;
 
 FILE *debug = fopen("debug.txt", "w");
 
+
+
 class ClientInfo {
     private:
         char id[11];
         int socket;
         struct sockaddr_in addr;
         vector<string> topics;
+        vector<string> wildcard_topics;
+        bool connected;
 
     public:
         ClientInfo() {
             memset(id, 0, sizeof(id));
             socket = -1;
             memset(&addr, 0, sizeof(addr));
+            connected = false;
         }
 
         ClientInfo(char* id, int socket, struct sockaddr_in addr) {
             memcpy(this->id, id, sizeof(this->id));
             this->socket = socket;
             this->addr = addr;
+            connected = true;
         }
 
         void add_topic(string topic) {
-            topics.push_back(topic);
+            // If no + or *
+            if ( topic.find('+') == string::npos && topic.find('*') == string::npos ) {
+                topics.push_back(topic);
+            } else {
+                // printf("Adding wildcard topic: %s\n", topic.c_str());
+                wildcard_topics.push_back(topic);
+            }
         }
 
         int remove_topic(string topic) {
+            int rc = -1;
             for ( int i = 0; i < topics.size(); i++ ) {
                 if ( topics[i] == topic ) {
                     topics.erase(topics.begin() + i);
-                    return 0;
+                    // return 0;
+                    rc = 0;
                 }
             }
-            return -1;
+            for ( int i = 0; i < wildcard_topics.size(); i++ ) {
+                if ( wildcard_topics[i] == topic ) {
+                    wildcard_topics.erase(wildcard_topics.begin() + i);
+                    rc = 0;
+                }
+            }
+            return rc;
         }
 
         vector<string> get_topics() {
             return topics;
+        }
+
+        vector<string> get_topics_wild() {
+            return wildcard_topics;
         }
 
         int get_socket() {
@@ -75,6 +99,14 @@ class ClientInfo {
 
         void set_socket(int socket) {
             this->socket = socket;
+        }
+
+        void set_connected(bool connected) {
+            this->connected = connected;
+        }
+
+        bool is_connected() {
+            return connected;
         }
 };
 
@@ -187,8 +219,13 @@ class Message {
             ntohs(addr_src.sin_port), topic.c_str(), type.c_str(), text.c_str());
         }
 
-        void notify_subs(unordered_map<string, vector<string>> subs, unordered_map<string, ClientInfo> &clients) {
+        void notify_subs(unordered_map<string, vector<string>> subs, unordered_map<string, ClientInfo> &clients, vector<string> &clients_ids) {
             // printf("Notifying subscribers... for %s\n", topic.c_str());
+            string topic_no_final_slash = topic;
+            // topic_no_final_slash.erase(topic_no_final_slash.length() - 1);
+            if (!topic_no_final_slash.empty()) {
+                topic_no_final_slash.erase(topic_no_final_slash.length() - 1);
+            }
             // for (const auto& [topic, subscribers] : subs) {
             // //     // Print the topic
                 // printf("Topic from tcp: %lu.", topic.length());
@@ -209,13 +246,22 @@ class Message {
             // }
             // printf("Topic from udp: %lu.\n", topic.length());
             // printf("%lu", subs.count(topic));
-            if ( subs.count(topic) == 0 ) {
-                return;
-            }
+            // if ( subs.count(topic) == 0 ) {
+            //     return;
+            // }
             // printf("Notifying subscribers found\n");
+            // Clients ids -> bool
+            unordered_map<string, bool> sent;
+
             memmove(send_buffer + 4, send_buffer, send_buffer_len);
             memcpy(send_buffer, &send_buffer_len, 4);
             for ( auto sub : subs[topic] ) {
+                // First check if he is connected
+                if ( clients[sub].is_connected() == false ) {
+                    // printf("Client %s is not connected\n", sub.c_str());
+                    continue;
+                }
+                // printf("Found client (no wildcard)%s\n", sub.c_str());
                 int bytes_sent = 0;
                 while ( bytes_sent != send_buffer_len + sizeof(send_buffer_len) ) {
                     int rc = send(clients[sub].get_socket(), send_buffer, send_buffer_len + sizeof(send_buffer_len), 0);
@@ -229,6 +275,45 @@ class Message {
                         return;
                     }
                     bytes_sent += rc;
+                }
+                sent[sub] = true;
+            }
+
+            // Check wildcards of the clients that didnt get the message
+            for ( auto id : clients_ids ) {
+                // printf("Checking client %s\n", id.c_str());
+                if ( sent.find(id) != sent.end() ) {
+                    continue;
+                }
+                if ( clients[id].is_connected() == false ) {
+                    // printf("Client %s is not connected\n", sub.c_str());
+                    continue;
+                }
+                // printf("Found client(wildcard) %s\n", id.c_str());
+                for ( auto topic_wildcard : clients[id].get_topics_wild() ) {
+                    // topic_wildcard.erase(topic_wildcard.length() - 1);
+                    if (!topic_wildcard.empty()) {
+                        topic_wildcard.erase(topic_wildcard.length() - 1);
+                    }
+                    // printf("Checking topic %s. Match value: %d against %s. Wild len: %lu. Normal len: %lu\n", topic_wildcard.c_str(), match(topic_wildcard, topic_no_final_slash), topic.c_str(), topic_wildcard.length(), topic_no_final_slash.length());
+                    if ( match(topic_wildcard, topic_no_final_slash) ) {
+                        int bytes_sent = 0;
+                        while ( bytes_sent != send_buffer_len + sizeof(send_buffer_len) ) {
+                            int rc = send(clients[id].get_socket(), send_buffer, send_buffer_len + sizeof(send_buffer_len), 0);
+                            fprintf(debug, "Sent %d / %lu bytes\n", rc, send_buffer_len + sizeof(send_buffer_len));
+                            if ( rc < 0 ) {
+                                perror("TCP send failed\n");
+                                return;
+                            }
+                            if ( rc == 0 ) {
+                                fprintf(stderr, "Client refuses to talk to us\n");
+                                return;
+                            }
+                            bytes_sent += rc;
+                        }
+                        sent[id] = true;
+                        break;
+                    }
                 }
             }
         }
@@ -246,6 +331,7 @@ class Server {
         // Client FD -> Client ID
         unordered_map<int, string> clients_by_fd;
         unordered_map<string, ClientInfo> clients;
+        vector<string> clients_ids;
         // Topic -> Subscribers
         unordered_map<string, vector<string>> topics;
 
@@ -266,6 +352,14 @@ class Server {
             // }
             close(fd);
             // clients.erase(clients_by_fd[fd]);
+
+            for ( int i = 0 ; i < clients_ids.size() ; i++ ) {
+                if ( clients_ids[i] == clients_by_fd[fd] ) {
+                    clients_ids.erase(clients_ids.begin() + i);
+                    break;
+                }
+            }
+            clients[clients_by_fd[fd]].set_connected(false);
             clients_by_fd.erase(fd);
             for ( int i = 0; i < poll_cnt; i++ ) {
                 if ( poll_fds[i].fd == fd ) {
@@ -293,7 +387,7 @@ class Server {
             int bytes_processed = 0;
             while ( working ) {
                 int rc = recv(fd, &recv_buf[bytes_received], MAX_UDP_MESSAGE_SIZE, 0);
-                fprintf(debug, "Recv from client: %d / %lu\n", rc, sizeof(packet));
+                // fprintf(debug, "Recv from client: %d / %lu\n", rc, sizeof(packet));
                 if ( rc < 0 ) {
                     perror("TCP receive failed\n");
                     return;
@@ -310,10 +404,10 @@ class Server {
                 while ( 1 ) {
 
                     memcpy(&packet, recv_buf + bytes_processed, sizeof(packet));
-                    fprintf(debug, "Packet type: %d. Packet len: %d\n", packet.type, packet.len);
+                    // fprintf(debug, "Packet type: %d. Packet len: %d\n", packet.type, packet.len);
 
                     if ( bytes_received < sizeof(packet) + packet.len + bytes_processed) {
-                        continue;
+                        break;
                     }
 
 
@@ -335,8 +429,8 @@ class Server {
                             topics[topic].push_back(clients_by_fd[fd]);
                             clients[clients_by_fd[fd]].add_topic(topic);
 
-                            fprintf(debug, "Client %s subscribed to topic %s\n", clients_by_fd[fd].c_str(), topic.c_str());
-                            fprintf(debug, "Topic %s has %ld subscribers\n", topic.c_str(), topics[topic].size());
+                            // fprintf(debug, "Client %s subscribed to topic %s\n", clients_by_fd[fd].c_str(), topic.c_str());
+                            // fprintf(debug, "Topic %s has %ld subscribers\n", topic.c_str(), topics[topic].size());
                             break;
                         }
                         case CLIENT_UNSUBSCRIBE_TYPE: {
@@ -356,8 +450,8 @@ class Server {
                                 topics.erase(topic);
                             }
 
-                            fprintf(debug, "Client %s unsubscribed from topic %s\n", clients_by_fd[fd].c_str(), topic.c_str());
-                            fprintf(debug, "Topic %s has %ld subscribers\n", topic.c_str(), topics[topic].size());
+                            // fprintf(debug, "Client %s unsubscribed from topic %s\n", clients_by_fd[fd].c_str(), topic.c_str());
+                            // fprintf(debug, "Topic %s has %ld subscribers\n", topic.c_str(), topics[topic].size());
                             break;
                         }
                     }
@@ -440,6 +534,7 @@ class Server {
                     fprintf(debug, "Welcome back %s!\n", id);
                     // clients_by_fd[client_socket] = string(id);
                     clients[string(id)].set_socket(client_socket);
+                    clients[string(id)].set_connected(true);
                 }
 
             } else {
@@ -447,6 +542,7 @@ class Server {
                 clients[string(id)] = client;
             }
 
+            clients_ids.push_back(string(id));
             clients_by_fd[client_socket] = string(id);
 
             printf("New client %s connected from %s:%d.\n", id, inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
@@ -471,7 +567,7 @@ class Server {
             }
 
             Message msg(client_addr, buffer, bytes_received);
-            msg.notify_subs(topics, clients);
+            msg.notify_subs(topics, clients, clients_ids);
         }
 
         void talk_to_myself() {
