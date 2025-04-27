@@ -24,7 +24,7 @@ class Client {
         int poll_cnt = 0;
 
         void handle_server() {
-            char buffer[MAX_UDP_MESSAGE_SIZE];
+            char buffer[MAX_UDP_MESSAGE_SIZE * 10];
             char print_buffer[MAX_UDP_MESSAGE_SIZE];
             memset(buffer, 0, sizeof(buffer));
             char *pointer_print = buffer;
@@ -94,11 +94,23 @@ class Client {
             scanf("%s", topic);
 
             packet.len = strlen(topic) + 1;
-            memcpy(packet.data, topic, packet.len);
-            packet.data[packet.len] = '\0';
+            char send_buf[MAX_UDP_MESSAGE_SIZE];
+            memset(send_buf, 0, sizeof(send_buf));
+            memcpy(send_buf, &packet, sizeof(packet));
+            memcpy(send_buf + sizeof(packet), topic, packet.len);
+            fprintf(debug, "Packet with len %d and str: %s\n", packet.len, topic);
+            // packet.data[packet.len] = '\0';
+            if ( strcmp(buffer, "subscribe") == 0 ) {
+                printf("Subscribed to topic %s\n", topic);
+                fprintf(debug, "Subscribed to topic %s\n", topic);
+            } else if ( strcmp(buffer, "unsubscribe") == 0 ) {
+                printf("Unsubscribed from topic %s\n", topic);
+                fprintf(debug, "Unsubscribed from topic %s\n", topic);
+            }
             int bytes_sent = 0;
-            while ( bytes_sent != sizeof(packet) ) {
-                int rc = send(tcp_socket, &packet, sizeof(packet), 0);
+            while ( bytes_sent != sizeof(packet) + packet.len ) {
+                int rc = send(tcp_socket, send_buf, sizeof(packet) + packet.len, 0);
+                fprintf(debug, "Sent %d bytes out of %lu\n", rc, sizeof(packet) + packet.len);
                 if ( rc <= 0 ) {
                     perror("TCP send failed -> Handling stdin failed miserably\n");
                     fprintf(debug, "TCP send failed, sent %d bytes / %lu\n", bytes_sent, sizeof(packet));
@@ -107,13 +119,6 @@ class Client {
                 bytes_sent += rc;
             }
 
-            if ( strcmp(buffer, "subscribe") == 0 ) {
-                printf("Subscribed to topic %s\n", topic);
-                fprintf(debug, "Subscribed to topic %s\n", topic);
-            } else if ( strcmp(buffer, "unsubscribe") == 0 ) {
-                printf("Unsubscribed from topic %s\n", topic);
-                fprintf(debug, "Unsubscribed from topic %s\n", topic);
-            }
         }
 
     public:
@@ -143,21 +148,24 @@ class Client {
             server_addr.sin_family = AF_INET;
             server_addr.sin_port = htons(port);
             inet_pton(AF_INET, ip, &server_addr.sin_addr);
-
+            // printf("Connecting to %s:%d\n", ip, port);
             if ( connect(tcp_socket, (struct sockaddr*)&server_addr, sizeof(server_addr)) < 0 ) {
                 perror("TCP connect failed\n");
                 exit(1);
             }
-
+            // printf("Connected to %s:%d\n", ip, port);
+            char buf[MAX_UDP_MESSAGE_SIZE];
+            memset(buf, 0, sizeof(buf));
             client_packet packet;
             packet.type = CLIENT_ID_TYPE;
             packet.len = strlen(id) + 1;
-            memcpy(packet.data, id, packet.len);
+            memcpy(buf, &packet, sizeof(packet));
+            memcpy(buf + sizeof(packet), id, packet.len);
 
             int bytes_sent = 0;
-
-            while ( bytes_sent != sizeof(packet) ) {
-                int rc = send(tcp_socket, &packet, sizeof(packet), 0);
+            // printf("Sending client id %s\n", id);
+            while ( bytes_sent != sizeof(packet) + packet.len ) {
+                int rc = send(tcp_socket, buf, sizeof(packet) + packet.len, 0);
                 if ( rc < 0 ) {
                     fprintf(debug, "TCP send failed, sent %d bytes / %lu\n", bytes_sent, sizeof(packet));
                     exit(1);
@@ -165,7 +173,7 @@ class Client {
                 // printf("STOP IGNORING ME. Bytes sent: %d\n", rc);
                 bytes_sent += rc;
             }
-
+            // printf("Sent %d bytes\n", bytes_sent);
             poll_fds[0].fd = tcp_socket;
             poll_fds[0].events = POLLIN;
 
