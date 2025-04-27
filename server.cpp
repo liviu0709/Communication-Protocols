@@ -328,6 +328,10 @@ class Server {
         pollfd poll_fds[MAX_CONNECTIONS];
         int poll_cnt = 0;
 
+        // Client FD -> bool
+        unordered_map<int, bool> waiting_for_name;
+        unordered_map<int, sockaddr_in> client_addrs;
+
         // Client FD -> Client ID
         unordered_map<int, string> clients_by_fd;
         unordered_map<string, ClientInfo> clients;
@@ -377,6 +381,99 @@ class Server {
         }
 
         void handle_subs(int fd) {
+            if ( waiting_for_name[fd] ) {
+                char buf[MAX_UDP_MESSAGE_SIZE];
+                client_packet packet;
+                int bytes_received = 0;
+                // printf("Waiting for client id...\n");
+                while ( 1 ) {
+                    int rc = recv(fd, ((char*)&buf) + bytes_received, MAX_UDP_MESSAGE_SIZE, 0);
+                    fprintf(debug, "Recv from connect: %d\n", rc);
+                    if ( rc < 0 ) {
+                        perror("TCP receive failed\n");
+                        return;
+                    }
+                    if ( rc == 0 ) {
+                        close(fd);
+
+                        for ( int i = 0; i < poll_cnt; i++ ) {
+                            if ( poll_fds[i].fd == fd ) {
+                                memset(&poll_fds[i], 0, sizeof(poll_fds[i]));
+                                for ( int j = i; j < poll_cnt - 1; j++ ) {
+                                    poll_fds[j] = poll_fds[j + 1];
+                                }
+                                poll_cnt--;
+                                break;
+                            }
+                        }
+
+                        waiting_for_name[fd] = false;
+
+                        return;
+                    }
+                    bytes_received += rc;
+                    if ( bytes_received < sizeof(packet) ) {
+                        continue;
+                    }
+                    memcpy(&packet, buf, sizeof(packet));
+                    if ( bytes_received == sizeof(packet) + packet.len ) {
+                        break;
+                    }
+                }
+                waiting_for_name[fd] = false;
+                // printf("Received client id: %s\n", packet.data);
+                // int rc = recv(fd, &packet, sizeof(packet), 0);
+                if ( packet.type != CLIENT_ID_TYPE ) {
+                    fprintf(debug, "Invalid packet type: %d\n", packet.type);
+                    close(fd);
+                    return;
+                }
+
+                char id[11];
+                memcpy(id, buf + sizeof(packet), packet.len);
+                sockaddr_in client_addr = client_addrs[fd];
+                // client connected before
+                if ( clients.find(string(id)) != clients.end() ) {
+                    if ( clients_by_fd.find(clients[string(id)].get_socket()) != clients_by_fd.end() ) {
+                        printf("Client %s already connected.\n", id);
+                        fprintf(debug, "Client %s already connected.\n", id);
+                        close(fd);
+
+                        for ( int i = 0; i < poll_cnt; i++ ) {
+                            // Delete the guy trying to connect, not the client that is already connected
+                            if ( poll_fds[i].fd == fd ) {
+                                memset(&poll_fds[i], 0, sizeof(poll_fds[i]));
+                                for ( int j = i; j < poll_cnt - 1; j++ ) {
+                                    poll_fds[j] = poll_fds[j + 1];
+                                }
+                                poll_cnt--;
+                                break;
+                            }
+                        }
+
+                        waiting_for_name[fd] = false;
+
+                        return;
+                    } else {
+                        fprintf(debug, "Welcome back %s!\n", id);
+                        // clients_by_fd[fd] = string(id);
+                        clients[string(id)].set_socket(fd);
+                        clients[string(id)].set_connected(true);
+                    }
+
+                } else {
+                    ClientInfo client(id, fd, client_addr);
+                    clients[string(id)] = client;
+                }
+
+                clients_ids.push_back(string(id));
+                clients_by_fd[fd] = string(id);
+
+                printf("New client %s connected from %s:%d.\n", id, inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
+                fprintf(debug, "New client %s connected from %s:%d.\n", id, inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
+
+
+            } else {
             // printf("GOING TO HANDLE SHIT\n");
             // Infinity loop when client disconnects
             char recv_buf[MAX_UDP_MESSAGE_SIZE];
@@ -385,6 +482,7 @@ class Server {
             int bytes_received = 0;
             bool working = true;
             int bytes_processed = 0;
+            // printf("Going to handle client commands\n");
             while ( working ) {
                 int rc = recv(fd, &recv_buf[bytes_received], MAX_UDP_MESSAGE_SIZE, 0);
                 // fprintf(debug, "Recv from client: %d / %lu\n", rc, sizeof(packet));
@@ -468,6 +566,8 @@ class Server {
                     }
                 }
             }
+            // printf("Commands handled successfully\n");
+        }
 
         }
 
@@ -481,6 +581,7 @@ class Server {
                 perror("TCP accept failed\n");
                 return;
             }
+            client_addrs[client_socket] = client_addr;
             // printf("Accepted TCP client from %s:%d\n", inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
 
             // Disable Nagle's algorithm
@@ -488,65 +589,7 @@ class Server {
             if ( setsockopt(client_socket, IPPROTO_TCP, TCP_NODELAY, &enable, sizeof(int)) < 0 )
                 perror("setsockopt(TCP_NODELAY) failed\n");
 
-            char buf[MAX_UDP_MESSAGE_SIZE];
-            client_packet packet;
-            int bytes_received = 0;
-            // printf("Waiting for client id...\n");
-            while ( 1 ) {
-                int rc = recv(client_socket, ((char*)&buf) + bytes_received, MAX_UDP_MESSAGE_SIZE, 0);
-                fprintf(debug, "Recv from connect: %d\n", rc);
-                if ( rc < 0 ) {
-                    perror("TCP receive failed\n");
-                    return;
-                }
-                if ( rc == 0 ) {
-                    close(client_socket);
-                    return;
-                }
-                bytes_received += rc;
-                if ( bytes_received < sizeof(packet) ) {
-                    continue;
-                }
-                memcpy(&packet, buf, sizeof(packet));
-                if ( bytes_received == sizeof(packet) + packet.len ) {
-                    break;
-                }
-            }
-            // printf("Received client id: %s\n", packet.data);
-            // int rc = recv(client_socket, &packet, sizeof(packet), 0);
-            if ( packet.type != CLIENT_ID_TYPE ) {
-                fprintf(debug, "Invalid packet type: %d\n", packet.type);
-                close(client_socket);
-                return;
-            }
-
-            char id[11];
-            memcpy(id, buf + sizeof(packet), packet.len);
-
-            // client connected before
-            if ( clients.find(string(id)) != clients.end() ) {
-                if ( clients_by_fd.find(clients[string(id)].get_socket()) != clients_by_fd.end() ) {
-                    printf("Client %s already connected.\n", id);
-                    fprintf(debug, "Client %s already connected.\n", id);
-                    close(client_socket);
-                    return;
-                } else {
-                    fprintf(debug, "Welcome back %s!\n", id);
-                    // clients_by_fd[client_socket] = string(id);
-                    clients[string(id)].set_socket(client_socket);
-                    clients[string(id)].set_connected(true);
-                }
-
-            } else {
-                ClientInfo client(id, client_socket, client_addr);
-                clients[string(id)] = client;
-            }
-
-            clients_ids.push_back(string(id));
-            clients_by_fd[client_socket] = string(id);
-
-            printf("New client %s connected from %s:%d.\n", id, inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
-            fprintf(debug, "New client %s connected from %s:%d.\n", id, inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
+            waiting_for_name[client_socket] = true;
 
             poll_fds[poll_cnt].fd = client_socket;
             poll_fds[poll_cnt].events = POLLIN;
@@ -667,13 +710,18 @@ class Server {
                     // }
 
                     if ( poll_fds[i].revents & POLLIN ) {
+                        // printf("Current poll size: %d\n", poll_cnt);
                         if ( poll_fds[i].fd == tcp_socket ) {
+                            // printf("TCP client connected\n");
                             talk_to_tcp_client();
                         } else if ( poll_fds[i].fd == udp_socket ) {
+                            // printf("UDP client connected\n");
                             talk_to_udp_client();
                         } else if ( poll_fds[i].fd == fileno(stdin) ) {
+                            // printf("STDIN client connected\n");
                             talk_to_myself();
                         } else {
+                            // printf("TCP client %d has data for me\n", poll_fds[i].fd);
                             handle_subs(poll_fds[i].fd);
                         }
                     }
