@@ -65,22 +65,17 @@ class ClientInfo {
             }
         }
 
-        int remove_topic(string topic) {
-            int rc = -1;
+        void remove_topic(string topic) {
             for ( int i = 0; i < topics.size(); i++ ) {
                 if ( topics[i] == topic ) {
                     topics.erase(topics.begin() + i);
-                    // return 0;
-                    rc = 0;
                 }
             }
             for ( int i = 0; i < wildcard_topics.size(); i++ ) {
                 if ( wildcard_topics[i] == topic ) {
                     wildcard_topics.erase(wildcard_topics.begin() + i);
-                    rc = 0;
                 }
             }
-            return rc;
         }
 
         vector<string> get_topics() {
@@ -251,15 +246,12 @@ class Message {
 
             // Check wildcards of the clients that didnt get the message
             for ( auto id : clients_ids ) {
-                // printf("Checking client %s\n", id.c_str());
                 if ( sent.find(id) != sent.end() ) {
                     continue;
                 }
                 if ( clients[id].is_connected() == false ) {
-                    // printf("Client %s is not connected\n", sub.c_str());
                     continue;
                 }
-                // printf("Found client(wildcard) %s\n", id.c_str());
                 for ( auto topic_wildcard : clients[id].get_topics_wild() ) {
                     // Is this actually needed?
                     if (!topic_wildcard.empty()) {
@@ -290,21 +282,19 @@ class Message {
 
 class Server {
     private:
-        int port;
-        const int udp_socket, tcp_socket;
+        const int udp_socket, tcp_socket, standard_input;
         struct sockaddr_in server_addr;
-
-        // pollfd poll_fds[MAX_CONNECTIONS];
         vector<pollfd> poll_fds;
-        int poll_cnt = 0;
 
         // Client FD -> bool
         unordered_map<int, bool> waiting_for_name;
+        // Client FD -> Client address
         unordered_map<int, sockaddr_in> client_addrs;
-
         // Client FD -> Client ID
         unordered_map<int, string> clients_by_fd;
+        // Client ID -> Client Info
         unordered_map<string, ClientInfo> clients;
+        // Client id list
         vector<string> clients_ids;
         // Topic -> Subscribers
         unordered_map<string, set<string>> topics;
@@ -401,11 +391,9 @@ class Server {
                 get_client_id(fd);
             } else {
                 char recv_buf[MAX_UDP_MESSAGE_SIZE];
-                memset(recv_buf, 0, sizeof(recv_buf));
                 client_packet packet;
-                int bytes_received = 0;
+                int bytes_received = 0, bytes_processed = 0;
                 bool working = true;
-                int bytes_processed = 0;
                 while ( working ) {
                     int rc = recv_with_error_checks(fd, &recv_buf[bytes_received], MAX_UDP_MESSAGE_SIZE);
                     if ( rc == 0 ) {
@@ -425,10 +413,6 @@ class Server {
                             perror("Invalid packet length\n");
                             return;
                         }
-                        if ( packet.type != CLIENT_SUBSCRIBE_TYPE && packet.type != CLIENT_UNSUBSCRIBE_TYPE ) {
-                            printf("Invalid packet type: %d\n", packet.type);
-                            return;
-                        }
                         string topic(recv_buf + sizeof(packet) + bytes_processed, packet.len);
                         switch ( packet.type ) {
                             case CLIENT_SUBSCRIBE_TYPE: {
@@ -437,17 +421,17 @@ class Server {
                                 break;
                             }
                             case CLIENT_UNSUBSCRIBE_TYPE: {
-                                int rc = clients[clients_by_fd[fd]].remove_topic(topic);
-                                if ( rc < 0 ) {
-                                    perror("Failed to remove topic from client\n");
-                                    return;
-                                }
+                                clients[clients_by_fd[fd]].remove_topic(topic);
                                 auto &subs = topics[topic];
                                 subs.erase(clients_by_fd[fd]);
                                 if ( subs.size() == 0 ) {
                                     topics.erase(topic);
                                 }
                                 break;
+                            }
+                            default: {
+                                printf("Invalid packet type: %d\n", packet.type);
+                                return;
                             }
                         }
                         bytes_processed += sizeof(packet) + packet.len;
@@ -491,21 +475,19 @@ class Server {
             char buffer[MAX_UDP_MESSAGE_SIZE];
             struct sockaddr_in client_addr;
             socklen_t addr_len = sizeof(client_addr);
-
-            int bytes_received = recvfrom(udp_socket, buffer, sizeof(buffer), 0, (struct sockaddr*)&client_addr, &addr_len);
-
+            int bytes_received = recvfrom(udp_socket, buffer, sizeof(buffer), 0,
+            (struct sockaddr*)&client_addr, &addr_len);
             if ( bytes_received < 0 ) {
                 perror("UDP receive failed\n");
                 return;
             }
-
             Message msg(client_addr, buffer, bytes_received);
             msg.notify_subs(topics, clients, clients_ids);
         }
 
         void talk_to_myself() {
             char buffer[STDIN_BUF_SIZE];
-            int bytes_received = read(fileno(stdin), buffer, sizeof(buffer));
+            int bytes_received = read(standard_input, buffer, sizeof(buffer));
 
             if ( bytes_received < 0 ) {
                 perror("STDIN read failed\n");
@@ -518,12 +500,15 @@ class Server {
                 // Also close all clients!
                 leave_me_alone();
                 exit(0);
+            } else {
+                printf("Invalid command... all I can do is exit\n");
             }
         }
 
         void leave_me_alone() {
             for ( int i = 0; i < poll_fds.size() ; i++ ) {
-                if ( poll_fds[i].fd != tcp_socket && poll_fds[i].fd != udp_socket && poll_fds[i].fd != fileno(stdin) ) {
+                // Notify all connected clients
+                if ( poll_fds[i].fd != tcp_socket && poll_fds[i].fd != udp_socket && poll_fds[i].fd != standard_input ) {
                     close(poll_fds[i].fd);
                     poll_fds.erase(poll_fds.begin() + i);
                     i--;
@@ -534,45 +519,44 @@ class Server {
     public:
         Server(int port) :
             udp_socket(socket(AF_INET, SOCK_DGRAM, 0)),
-            tcp_socket(socket(AF_INET, SOCK_STREAM, 0))
+            tcp_socket(socket(AF_INET, SOCK_STREAM, 0)),
+            standard_input(fileno(stdin))
         {
-            this->port = port;
-
             server_addr.sin_family = AF_INET;
             server_addr.sin_addr.s_addr = INADDR_ANY;
             server_addr.sin_port = htons(port);
 
             // Make ports reusable, in case we run this really fast two times in a row
             int enable = 1;
-            if (setsockopt(udp_socket, SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(int)) < 0)
+            if ( setsockopt(udp_socket, SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(int)) < 0 )
                 perror("setsockopt(SO_REUSEADDR) failed UDP\n");
-            if (setsockopt(tcp_socket, SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(int)) < 0)
+            if ( setsockopt(tcp_socket, SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(int)) < 0 )
                 perror("setsockopt(SO_REUSEADDR) failed TCP\n");
 
             // Disable Nagle's algorithm
-            if (setsockopt(tcp_socket, IPPROTO_TCP, TCP_NODELAY, &enable, sizeof(int)) < 0)
+            if ( setsockopt(tcp_socket, IPPROTO_TCP, TCP_NODELAY, &enable, sizeof(int)) < 0 )
                 perror("setsockopt(TCP_NODELAY) failed\n");
 
-            int ret;
-            ret = bind(udp_socket, (struct sockaddr*)&server_addr, sizeof(server_addr));
-            if ( ret < 0 ) {
+            if ( bind(udp_socket, (struct sockaddr*)&server_addr, sizeof(server_addr)) < 0 ) {
                 perror("UDP bind failed\n");
                 exit(1);
             }
-            ret = bind(tcp_socket, (struct sockaddr*)&server_addr, sizeof(server_addr));
-            if ( ret < 0 ) {
+
+            if ( bind(tcp_socket, (struct sockaddr*)&server_addr, sizeof(server_addr)) < 0 ) {
                 perror("TCP bind failed\n");
                 exit(1);
             }
 
-
-            listen(tcp_socket, MAX_INCOMING_CONNECTIONS);
+            if ( listen(tcp_socket, MAX_INCOMING_CONNECTIONS) < 0 ) {
+                perror("TCP listen failed\n");
+                exit(1);
+            }
 
             pollfd tcp, udp, terminal;
             tcp.fd = tcp_socket;
             tcp.events = udp.events = terminal.events = POLLIN;
             udp.fd = udp_socket;
-            terminal.fd = fileno(stdin);
+            terminal.fd = standard_input;
 
             poll_fds.push_back(tcp);
             poll_fds.push_back(udp);
@@ -580,43 +564,25 @@ class Server {
         }
 
         void start() {
-            int ret;
-
-            // printf("Server started on port %d\n", port);
-
             while(1) {
-
-                ret = poll(poll_fds.data(), poll_fds.size(), -1);
-
+                int ret = poll(poll_fds.data(), poll_fds.size(), -1);
                 if ( ret < 0 ) {
                     perror("Poll failed\n");
                     exit(1);
                 }
 
                 for ( int i = 0; i < poll_fds.size() ; i++ ) {
-                    // if ( (poll_fds[i].revents & POLLHUP) || (poll_fds[i].revents & POLLERR) ) {
-                    //     disconnect_client(poll_fds[i].fd);
-                    //     break;
-                    // }
-
                     if ( poll_fds[i].revents & POLLIN ) {
-                        // printf("Current poll size: %d\n", poll_cnt);
                         if ( poll_fds[i].fd == tcp_socket ) {
-                            // printf("TCP client connected\n");
                             talk_to_tcp_client();
                         } else if ( poll_fds[i].fd == udp_socket ) {
-                            // printf("UDP client connected\n");
                             talk_to_udp_client();
-                        } else if ( poll_fds[i].fd == fileno(stdin) ) {
-                            // printf("STDIN client connected\n");
+                        } else if ( poll_fds[i].fd == standard_input ) {
                             talk_to_myself();
                         } else {
-                            // printf("TCP client %d has data for me\n", poll_fds[i].fd);
                             handle_subs(poll_fds[i].fd);
                         }
                     }
-
-
                 }
             }
         }
