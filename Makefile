@@ -1,4 +1,4 @@
-all: server subscriber
+all: server subscriber match
 
 server: server.cpp help.cpp
 	g++ -o server server.cpp help.cpp
@@ -12,5 +12,9 @@ match: test.cpp help.cpp
 
 demo: match
 	./match --gtest_filter=MatchFunctionTest.demo
+
+pack:
+	zip tema.zip *.cpp Makefile README.md *.h
+
 clean:
 	rm -f server subscriber
