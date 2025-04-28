@@ -12,8 +12,6 @@ using namespace std;
 
 #define STDIN_BUF_SIZE 100
 
-// FILE *debug = fopen("debug_client.txt", "a");
-
 class Client {
     private:
         const int tcp_socket;
@@ -33,13 +31,11 @@ class Client {
             bool working = true;
             while ( working ) {
                 int rc = recv(tcp_socket, pointer_read, sizeof(buffer) - bytes_received, 0);
-                // fprintf(debug, "Received %d bytes\n", rc);
                 if ( rc < 0 ) {
                     perror("TCP receive failed\n");
                     return;
                 }
                 if ( rc == 0 ) {
-                    // fprintf(debug, "Server closed the connection\n");
                     close(tcp_socket);
                     exit(1);
                 }
@@ -49,11 +45,9 @@ class Client {
                 msg_len = *(int*)pointer_print;
                 while ( bytes_received >= sizeof(int) ) {
                     while ( bytes_received >= msg_len + sizeof(int) ) {
-                        // fprintf(debug, "Received message of length %d. but i have %d bytes\n", msg_len, bytes_received);
                         memcpy(print_buffer, pointer_print + sizeof(int), msg_len);
                         print_buffer[msg_len] = '\0';
                         printf("%s", print_buffer);
-                        // fprintf(debug, "%s", print_buffer);
                         pointer_print += msg_len + sizeof(int);
                         bytes_received -= msg_len + sizeof(int);
                         if ( bytes_received < sizeof(int) )
@@ -62,7 +56,6 @@ class Client {
                     }
                     if ( bytes_received == 0 ) {
                         working = false;
-                        // fprintf(debug, "Stopping reading with %d bytes received and msg len %d\n", bytes_received, msg_len);
                         break;
                     }
 
@@ -82,9 +75,7 @@ class Client {
             client_packet packet;
             if ( strcmp(buffer, "subscribe") == 0 ) {
                 packet.type = CLIENT_SUBSCRIBE_TYPE;
-                // printf("Subscribed to topic %s\n", topic);
             } else if ( strcmp(buffer, "unsubscribe") == 0 ) {
-                // printf("Unsubscribed from topic %s\n", topic);
                 packet.type = CLIENT_UNSUBSCRIBE_TYPE;
             } else {
                 printf("Invalid command\n");
@@ -98,27 +89,20 @@ class Client {
             memset(send_buf, 0, sizeof(send_buf));
             memcpy(send_buf, &packet, sizeof(packet));
             memcpy(send_buf + sizeof(packet), topic, packet.len);
-            // fprintf(debug, "Packet with len %d and str: %s\n", packet.len, topic);
-            // packet.data[packet.len] = '\0';
             if ( strcmp(buffer, "subscribe") == 0 ) {
                 printf("Subscribed to topic %s\n", topic);
-                // fprintf(debug, "Subscribed to topic %s\n", topic);
             } else if ( strcmp(buffer, "unsubscribe") == 0 ) {
                 printf("Unsubscribed from topic %s\n", topic);
-                // fprintf(debug, "Unsubscribed from topic %s\n", topic);
             }
             int bytes_sent = 0;
             while ( bytes_sent != sizeof(packet) + packet.len ) {
                 int rc = send(tcp_socket, send_buf, sizeof(packet) + packet.len, 0);
-                // fprintf(debug, "Sent %d bytes out of %lu\n", rc, sizeof(packet) + packet.len);
                 if ( rc <= 0 ) {
                     perror("TCP send failed -> Handling stdin failed miserably\n");
-                    // fprintf(debug, "TCP send failed, sent %d bytes / %lu\n", bytes_sent, sizeof(packet));
                     exit(1);
                 }
                 bytes_sent += rc;
             }
-
         }
 
     public:
@@ -143,17 +127,15 @@ class Client {
             memcpy(id, name, strlen(name));
             id[strlen(name)] = '\0';
 
-            // printf("Registered id: %s\n", id);
-
             server_addr.sin_family = AF_INET;
             server_addr.sin_port = htons(port);
             inet_pton(AF_INET, ip, &server_addr.sin_addr);
-            // printf("Connecting to %s:%d\n", ip, port);
+
             if ( connect(tcp_socket, (struct sockaddr*)&server_addr, sizeof(server_addr)) < 0 ) {
                 perror("TCP connect failed\n");
                 exit(1);
             }
-            // printf("Connected to %s:%d\n", ip, port);
+
             char buf[MAX_UDP_MESSAGE_SIZE];
             memset(buf, 0, sizeof(buf));
             client_packet packet;
@@ -163,17 +145,14 @@ class Client {
             memcpy(buf + sizeof(packet), id, packet.len);
 
             int bytes_sent = 0;
-            // printf("Sending client id %s\n", id);
+
             while ( bytes_sent != sizeof(packet) + packet.len ) {
                 int rc = send(tcp_socket, buf, sizeof(packet) + packet.len, 0);
                 if ( rc < 0 ) {
-                    // fprintf(debug, "TCP send failed, sent %d bytes / %lu\n", bytes_sent, sizeof(packet));
                     exit(1);
                 }
-                // printf("STOP IGNORING ME. Bytes sent: %d\n", rc);
                 bytes_sent += rc;
             }
-            // printf("Sent %d bytes\n", bytes_sent);
             poll_fds[0].fd = tcp_socket;
             poll_fds[0].events = POLLIN;
 
@@ -201,26 +180,20 @@ class Client {
                     }
                     if ( poll_fds[i].revents & POLLHUP ) {
                         if ( poll_fds[i].fd == tcp_socket ) {
-                            // printf("Server closed the connection\n");
-                            // close(tcp_socket);
                             exit(1);
                         }
                     }
-
-
                 }
             }
         }
 };
 
 int main(int argc, char* argv[]) {
-    // fprintf(debug, "New client started\n");
     if ( argc != 4 ) {
         printf("./client [name] [ip] [port]\n");
         return 1;
     }
     setvbuf(stdout, NULL, _IONBF, BUFSIZ);
-    // setvbuf(debug, NULL, _IONBF, BUFSIZ);
     Client client(argv[1], argv[2], atoi(argv[3]));
     client.start();
 }
