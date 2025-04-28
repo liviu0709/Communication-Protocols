@@ -9,8 +9,8 @@ using namespace std;
 #define MAX_UDP_MESSAGE_SIZE 1800
 
 struct client_packet {
-    int type;
+    u_int8_t type;
     int len;
-};
+} __attribute__((packed));
 
 bool match(string wild, string topic);

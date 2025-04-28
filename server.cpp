@@ -1,6 +1,5 @@
 #include <cstdint>
 #include <cstdlib>
-#include <ostream>
 #include <string>
 #include <sys/poll.h>
 #include <sys/socket.h>
@@ -9,22 +8,18 @@
 #include <arpa/inet.h>
 #include <cstdio>
 #include <cstdlib>
-#include <iostream>
 #include <unistd.h>
 #include <poll.h>
 #include <string.h>
-#include <ostream>
 #include <unordered_map>
 #include <vector>
 #include <set>
 #include <netinet/tcp.h>
 #include "comms.h"
 
-
 using namespace std;
 
 #define MAX_INCOMING_CONNECTIONS 10
-#define MAX_CONNECTIONS 100
 #define STDIN_BUF_SIZE 50
 #define INT 0
 #define SHORT_REAL 1
@@ -36,7 +31,6 @@ class ClientInfo {
         char id[11];
         int socket;
         struct sockaddr_in addr;
-        vector<string> topics;
         vector<string> wildcard_topics;
         bool connected;
 
@@ -55,31 +49,16 @@ class ClientInfo {
             connected = true;
         }
 
-        void add_topic(string topic) {
-            // If no + or *
-            if ( topic.find('+') == string::npos && topic.find('*') == string::npos ) {
-                topics.push_back(topic);
-            } else {
-                // printf("Adding wildcard topic: %s\n", topic.c_str());
-                wildcard_topics.push_back(topic);
-            }
+        void add_topic_wild(string topic) {
+            wildcard_topics.push_back(topic);
         }
 
         void remove_topic(string topic) {
-            for ( int i = 0; i < topics.size(); i++ ) {
-                if ( topics[i] == topic ) {
-                    topics.erase(topics.begin() + i);
-                }
-            }
             for ( int i = 0; i < wildcard_topics.size(); i++ ) {
                 if ( wildcard_topics[i] == topic ) {
                     wildcard_topics.erase(wildcard_topics.begin() + i);
                 }
             }
-        }
-
-        vector<string> get_topics() {
-            return topics;
         }
 
         vector<string> get_topics_wild() {
@@ -407,16 +386,22 @@ class Server {
                         string topic(recv_buf + sizeof(packet) + bytes_processed, ntohl(packet.len));
                         switch ( packet.type ) {
                             case CLIENT_SUBSCRIBE_TYPE: {
-                                topics[topic].insert(clients_by_fd[fd]);
-                                clients[clients_by_fd[fd]].add_topic(topic);
+                                if ( topic.find('+') != string::npos || topic.find('*') != string::npos ) {
+                                    clients[clients_by_fd[fd]].add_topic_wild(topic);
+                                } else {
+                                    topics[topic].insert(clients_by_fd[fd]);
+                                }
                                 break;
                             }
                             case CLIENT_UNSUBSCRIBE_TYPE: {
-                                clients[clients_by_fd[fd]].remove_topic(topic);
-                                auto &subs = topics[topic];
-                                subs.erase(clients_by_fd[fd]);
-                                if ( subs.size() == 0 ) {
-                                    topics.erase(topic);
+                                if ( topic.find('+') != string::npos || topic.find('*') != string::npos ) {
+                                    clients[clients_by_fd[fd]].remove_topic(topic);
+                                } else {
+                                    auto &subs = topics[topic];
+                                    subs.erase(clients_by_fd[fd]);
+                                    if ( subs.size() == 0 ) {
+                                        topics.erase(topic);
+                                    }
                                 }
                                 break;
                             }
