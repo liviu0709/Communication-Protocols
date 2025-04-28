@@ -5,16 +5,11 @@ using namespace std;
 bool match(string wild, string topic) {
     int wild_coord = 0;
     int topic_coord = 0;
-    // printf("Wild: %s. Topic: %s\n", wild.c_str(), topic.c_str());
-    // printf("Wild len: %lu. Topic len: %lu\n", wild.length(), topic.length());
+
     for ( int i = 0; i < wild.length(); i++ ) {
 
-
-
-        // printf("Iter wild: %c\n", wild[i]);
         if ( wild[i] == '+') {
             // Logic for 1 level
-            // printf("Found + between wild [%c] and normal [%c]\n", wild[i], topic[topic_coord]);
             while ( topic[topic_coord] != '/' && topic_coord < topic.length() ) {
                 topic_coord++;
             }

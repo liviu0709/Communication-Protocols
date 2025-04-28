@@ -47,4 +47,5 @@ TEST(MatchFunctionTest, TesteleLor) {
 TEST(MatchFunctionTest, demo) {
     EXPECT_FALSE(match("pressure", "people"));
     EXPECT_FALSE(match("*/pressure", "upb/precis/elevator/1/people"));
+    EXPECT_TRUE(match("+", "xyz"));
 }
