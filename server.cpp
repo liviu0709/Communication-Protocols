@@ -31,10 +31,6 @@ using namespace std;
 #define FLOAT 2
 #define STRING 3
 
-FILE *debug = fopen("debug.txt", "w");
-
-
-
 class ClientInfo {
     private:
         char id[11];
@@ -145,8 +141,6 @@ class Message {
                 topic[50] = '\0';
             }
 
-            fprintf(debug, "Recv from udp: Topic: %s. Len: %lu\n", topic.c_str(), topic.length());
-
             // Data type is 1 byte
             memset(&data_type, 0, sizeof(data_type));
             memcpy((char*)&data_type, raw_data + 50, 1);
@@ -242,7 +236,6 @@ class Message {
                 int bytes_sent = 0;
                 while ( bytes_sent != send_buffer_len + sizeof(send_buffer_len) ) {
                     int rc = send(clients[sub].get_socket(), send_buffer, send_buffer_len + sizeof(send_buffer_len), 0);
-                    fprintf(debug, "Sent %d / %lu bytes\n", rc, send_buffer_len + sizeof(send_buffer_len));
                     if ( rc < 0 ) {
                         perror("TCP send failed\n");
                         return;
@@ -277,7 +270,6 @@ class Message {
                         int bytes_sent = 0;
                         while ( bytes_sent != send_buffer_len + sizeof(send_buffer_len) ) {
                             int rc = send(clients[id].get_socket(), send_buffer, send_buffer_len + sizeof(send_buffer_len), 0);
-                            fprintf(debug, "Sent %d / %lu bytes\n", rc, send_buffer_len + sizeof(send_buffer_len));
                             if ( rc < 0 ) {
                                 perror("TCP send failed\n");
                                 return;
@@ -363,8 +355,8 @@ class Server {
             waiting_for_name[fd] = false;
 
             if ( packet.type != CLIENT_ID_TYPE ) {
-                fprintf(debug, "Invalid packet type: %d\n", packet.type);
-                close(fd);
+                printf("Invalid packet type: %d\n", packet.type);
+                remove_and_close_fd(fd);
                 return;
             }
 
@@ -424,17 +416,13 @@ class Server {
                     if ( bytes_received < sizeof(packet) + bytes_processed ) {
                         continue;
                     }
-
                     while ( 1 ) {
                         memcpy(&packet, recv_buf + bytes_processed, sizeof(packet));
-
                         if ( bytes_received < sizeof(packet) + packet.len + bytes_processed) {
                             break;
                         }
-
                         if ( packet.len <= 0 ) {
                             perror("Invalid packet length\n");
-                            fprintf(debug, "Packet with %d len. Aborting handle\n", packet.len);
                             return;
                         }
                         if ( packet.type != CLIENT_SUBSCRIBE_TYPE && packet.type != CLIENT_UNSUBSCRIBE_TYPE ) {
@@ -442,7 +430,6 @@ class Server {
                             return;
                         }
                         string topic(recv_buf + sizeof(packet) + bytes_processed, packet.len);
-
                         switch ( packet.type ) {
                             case CLIENT_SUBSCRIBE_TYPE: {
                                 topics[topic].insert(clients_by_fd[fd]);
@@ -464,13 +451,9 @@ class Server {
                             }
                         }
                         bytes_processed += sizeof(packet) + packet.len;
-                        fprintf(debug, "Processed: %d out of %d\n", bytes_processed, bytes_received);
-
                         if ( bytes_received == bytes_processed ) {
-                            fprintf(debug, "Finally out of the loop\n");
                             working = false;
                         }
-
                         if ( bytes_received - bytes_processed < sizeof(packet) ) {
                             break;
                         }
@@ -645,7 +628,6 @@ int main(int argc, char* argv[]) {
         return 1;
     }
     setvbuf(stdout, NULL, _IONBF, BUFSIZ);
-    setvbuf(debug, NULL, _IONBF, 0);
     int port = atoi(argv[1]);
     Server server(port);
     server.start();
