@@ -113,6 +113,25 @@ class Message {
         bool recognized;
         char send_buffer[MAX_UDP_MESSAGE_SIZE];
         int send_buffer_len;
+        // Clients ids -> bool
+        unordered_map<string, bool> sent;
+
+        void send_to_client(int fd, string sub) {
+            int bytes_sent = 0;
+                while ( bytes_sent != send_buffer_len + sizeof(send_buffer_len) ) {
+                    int rc = send(fd, send_buffer, send_buffer_len + sizeof(send_buffer_len), 0);
+                    if ( rc < 0 ) {
+                        perror("TCP send failed\n");
+                        return;
+                    }
+                    if ( rc == 0 ) {
+                        fprintf(stderr, "Client refuses to talk to us\n");
+                        return;
+                    }
+                    bytes_sent += rc;
+                }
+                sent[sub] = true;
+        }
 
     public:
         Message() {
@@ -124,7 +143,6 @@ class Message {
 
         Message(struct sockaddr_in addr_src, char* raw_data, int raw_data_len) {
             this->addr_src = addr_src;
-
             // Topic field is always 50 bytes
             topic = string(raw_data, 50);
             // Trim the topic string to stop at the first '\0'
@@ -201,47 +219,34 @@ class Message {
                     recognized = true;
                     break;
                 }
-                default:
-                fprintf(stderr, "Unknown data type: %d\n", data_type);
-                recognized = false;
-                return;
+                default: {
+                    printf("Unknown data type: %d\n", data_type);
+                    recognized = false;
+                    return;
+                }
             }
             send_buffer_len = sprintf(send_buffer, "%s:%d - %s - %s - %s\n", inet_ntoa(addr_src.sin_addr),
             ntohs(addr_src.sin_port), topic.c_str(), type.c_str(), text.c_str());
         }
 
         void notify_subs(unordered_map<string, set<string>> subs, unordered_map<string, ClientInfo> &clients, vector<string> &clients_ids) {
+            if ( !recognized ) {
+                return;
+            }
             string topic_no_final_slash = topic;
-            // Is this actually needed?
+            // Make sure the topic is not empty
             if (!topic_no_final_slash.empty()) {
                 topic_no_final_slash.erase(topic_no_final_slash.length() - 1);
             }
-
-            // Clients ids -> bool
-            unordered_map<string, bool> sent;
-
             memmove(send_buffer + 4, send_buffer, send_buffer_len);
-            memcpy(send_buffer, &send_buffer_len, 4);
+            int network_order = htonl(send_buffer_len);
+            memcpy(send_buffer, &network_order, 4);
             for ( auto sub : subs[topic] ) {
                 // First check if he is connected
-                if ( clients[sub].is_connected() == false ) {
-
+                if ( !clients[sub].is_connected() ) {
                     continue;
                 }
-                int bytes_sent = 0;
-                while ( bytes_sent != send_buffer_len + sizeof(send_buffer_len) ) {
-                    int rc = send(clients[sub].get_socket(), send_buffer, send_buffer_len + sizeof(send_buffer_len), 0);
-                    if ( rc < 0 ) {
-                        perror("TCP send failed\n");
-                        return;
-                    }
-                    if ( rc == 0 ) {
-                        fprintf(stderr, "Client refuses to talk to us\n");
-                        return;
-                    }
-                    bytes_sent += rc;
-                }
-                sent[sub] = true;
+                send_to_client(clients[sub].get_socket(), sub);
             }
 
             // Check wildcards of the clients that didnt get the message
@@ -253,26 +258,12 @@ class Message {
                     continue;
                 }
                 for ( auto topic_wildcard : clients[id].get_topics_wild() ) {
-                    // Is this actually needed?
+                    // Make sure the topic is not empty
                     if (!topic_wildcard.empty()) {
                         topic_wildcard.erase(topic_wildcard.length() - 1);
                     }
-
                     if ( match(topic_wildcard, topic_no_final_slash) ) {
-                        int bytes_sent = 0;
-                        while ( bytes_sent != send_buffer_len + sizeof(send_buffer_len) ) {
-                            int rc = send(clients[id].get_socket(), send_buffer, send_buffer_len + sizeof(send_buffer_len), 0);
-                            if ( rc < 0 ) {
-                                perror("TCP send failed\n");
-                                return;
-                            }
-                            if ( rc == 0 ) {
-                                fprintf(stderr, "Client refuses to talk to us\n");
-                                return;
-                            }
-                            bytes_sent += rc;
-                        }
-                        sent[id] = true;
+                        send_to_client(clients[id].get_socket(), id);
                         break;
                     }
                 }
@@ -338,7 +329,7 @@ class Server {
                     continue;
                 }
                 memcpy(&packet, buf, sizeof(packet));
-                if ( bytes_received == sizeof(packet) + packet.len ) {
+                if ( bytes_received == sizeof(packet) + ntohl(packet.len) ) {
                     break;
                 }
             }
@@ -351,7 +342,7 @@ class Server {
             }
 
             char id[11];
-            memcpy(id, buf + sizeof(packet), packet.len);
+            memcpy(id, buf + sizeof(packet), ntohl(packet.len));
             sockaddr_in client_addr = client_addrs[fd];
             // Client connected before
             if ( clients.find(string(id)) != clients.end() ) {
@@ -406,14 +397,14 @@ class Server {
                     }
                     while ( 1 ) {
                         memcpy(&packet, recv_buf + bytes_processed, sizeof(packet));
-                        if ( bytes_received < sizeof(packet) + packet.len + bytes_processed) {
+                        if ( bytes_received < sizeof(packet) + ntohl(packet.len) + bytes_processed) {
                             break;
                         }
-                        if ( packet.len <= 0 ) {
+                        if ( ntohl(packet.len) <= 0 ) {
                             perror("Invalid packet length\n");
                             return;
                         }
-                        string topic(recv_buf + sizeof(packet) + bytes_processed, packet.len);
+                        string topic(recv_buf + sizeof(packet) + bytes_processed, ntohl(packet.len));
                         switch ( packet.type ) {
                             case CLIENT_SUBSCRIBE_TYPE: {
                                 topics[topic].insert(clients_by_fd[fd]);
@@ -434,7 +425,7 @@ class Server {
                                 return;
                             }
                         }
-                        bytes_processed += sizeof(packet) + packet.len;
+                        bytes_processed += sizeof(packet) + ntohl(packet.len);
                         if ( bytes_received == bytes_processed ) {
                             working = false;
                         }

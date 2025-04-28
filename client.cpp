@@ -42,7 +42,7 @@ class Client {
                 pointer_read += rc;
                 bytes_received += rc;
                 int msg_len;
-                msg_len = *(int*)pointer_print;
+                msg_len = ntohl(*(int*)pointer_print);
                 while ( bytes_received >= sizeof(int) ) {
                     while ( bytes_received >= msg_len + sizeof(int) ) {
                         memcpy(print_buffer, pointer_print + sizeof(int), msg_len);
@@ -52,7 +52,7 @@ class Client {
                         bytes_received -= msg_len + sizeof(int);
                         if ( bytes_received < sizeof(int) )
                             break;
-                        msg_len = *(int*)pointer_print;
+                        msg_len = ntohl(*(int*)pointer_print);
                     }
                     if ( bytes_received == 0 ) {
                         working = false;
@@ -84,19 +84,19 @@ class Client {
             char topic[STDIN_BUF_SIZE];
             scanf("%s", topic);
 
-            packet.len = strlen(topic) + 1;
+            packet.len = htonl(strlen(topic) + 1);
             char send_buf[MAX_UDP_MESSAGE_SIZE];
             memset(send_buf, 0, sizeof(send_buf));
             memcpy(send_buf, &packet, sizeof(packet));
-            memcpy(send_buf + sizeof(packet), topic, packet.len);
+            memcpy(send_buf + sizeof(packet), topic, ntohl(packet.len));
             if ( strcmp(buffer, "subscribe") == 0 ) {
                 printf("Subscribed to topic %s\n", topic);
             } else if ( strcmp(buffer, "unsubscribe") == 0 ) {
                 printf("Unsubscribed from topic %s\n", topic);
             }
             int bytes_sent = 0;
-            while ( bytes_sent != sizeof(packet) + packet.len ) {
-                int rc = send(tcp_socket, send_buf, sizeof(packet) + packet.len, 0);
+            while ( bytes_sent != sizeof(packet) + ntohl(packet.len) ) {
+                int rc = send(tcp_socket, send_buf, sizeof(packet) + ntohl(packet.len), 0);
                 if ( rc <= 0 ) {
                     perror("TCP send failed -> Handling stdin failed miserably\n");
                     exit(1);
@@ -140,14 +140,14 @@ class Client {
             memset(buf, 0, sizeof(buf));
             client_packet packet;
             packet.type = CLIENT_ID_TYPE;
-            packet.len = strlen(id) + 1;
+            packet.len = htonl(strlen(id) + 1);
             memcpy(buf, &packet, sizeof(packet));
-            memcpy(buf + sizeof(packet), id, packet.len);
+            memcpy(buf + sizeof(packet), id, ntohl(packet.len));
 
             int bytes_sent = 0;
 
-            while ( bytes_sent != sizeof(packet) + packet.len ) {
-                int rc = send(tcp_socket, buf, sizeof(packet) + packet.len, 0);
+            while ( bytes_sent != sizeof(packet) + ntohl(packet.len) ) {
+                int rc = send(tcp_socket, buf, sizeof(packet) + ntohl(packet.len), 0);
                 if ( rc < 0 ) {
                     exit(1);
                 }
