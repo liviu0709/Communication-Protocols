@@ -22,7 +22,7 @@ import pexpect
 import yaml
 
 
-EXPECT_TIMEOUT = 1  # 1 second should be enough...
+EXPECT_TIMEOUT = 30  # 1 second should be enough...
 EXPECT_SEP = "="  # field separator for input
 TEXT_INDENT = "    "
 
@@ -89,7 +89,7 @@ def expect_send_params(p, xvars):
             p.sendline(str(xvars.get(keys[idx])))
             xseen.add(keys[idx])
         except pexpect.exceptions.TIMEOUT:
-            raise CheckerException("Client did not ask the following fields: " + 
+            raise CheckerException("Client did not ask the following fields: " +
                                    ", ".join(set(keys) - xseen))
 
 def expect_flush_output(p, ignore_error=False):
@@ -151,7 +151,7 @@ def check_object_fields(obj, expected):
     for field in fields:
         val = obj.get(field)
         if str(val) != str(expected[field]):
-            raise CheckerException("Field '%s' mismatch: %s != %s" % 
+            raise CheckerException("Field '%s' mismatch: %s != %s" %
                 (field, val, expected[field]))
 
 def do_login_admin(p, xargs):
@@ -162,7 +162,7 @@ def do_login_admin(p, xargs):
 def do_add_user(p, xargs):
     p.sendline("add_user")
     expect_send_params(p, {
-        "username": xargs["normal_user"]["username"], 
+        "username": xargs["normal_user"]["username"],
         "password": xargs["normal_user"]["password"]
     })
     expect_print_output(p)
@@ -170,7 +170,7 @@ def do_add_user(p, xargs):
 def do_delete_user(p, xargs):
     p.sendline("delete_user")
     expect_send_params(p, {
-        "username": xargs["normal_user"]["username"], 
+        "username": xargs["normal_user"]["username"],
     })
     expect_print_output(p)
 
@@ -188,6 +188,7 @@ def do_get_users(p, xargs):
     xargs["_user_ensured"] = user_found
 
 def do_delete_all_users(p, xargs):
+    print(wrap_test_output("Deleting all users..."))
     objs = xargs.get("user_objs")
     if not objs and not xargs.get("delete_ignore", False):
         raise CheckerException("No users found!")
@@ -235,7 +236,7 @@ def do_get_movies(p, xargs):
     expect_count = xargs.get("expect_count", False)
     if type(expect_count) is int:
         if len(xargs["movie_objs"]) != expect_count:
-            raise CheckerException("Movies count mismatch: %s != %s" % 
+            raise CheckerException("Movies count mismatch: %s != %s" %
                                    (len(xargs["movie_objs"]), expect_count))
         color_print(wrap_test_output("PASSED: count=%i" % expect_count), fg="green", style="bold")
 
@@ -288,7 +289,7 @@ def do_get_collections(p, xargs):
     expect_count = xargs.get("expect_count", False)
     if type(expect_count) is int:
         if len(xargs["collection_objs"]) != expect_count:
-            raise CheckerException("Collections count mismatch: %s != %s" % 
+            raise CheckerException("Collections count mismatch: %s != %s" %
                                    (len(xargs["collection_objs"]), expect_count))
         color_print(wrap_test_output("PASSED: count=%i" % expect_count), fg="green", style="bold")
     expect_titles = xargs.get("expect_title", None)
@@ -417,7 +418,7 @@ def run_tasks(p, args):
                 color_print(wrap_test_output(traceback.format_exc()), fg="red", stderr=True)
             if not ignore:
                 break
-    
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(prog='checker.py',

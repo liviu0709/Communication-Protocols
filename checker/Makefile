@@ -24,5 +24,8 @@ A ?= --debug --admin "$(ADMIN)"
 run: client
 	$(VENV_PYTHON3) checker.py $(PROGRAM) $(A)
 
+clean: client
+	$(VENV_PYTHON3) checker.py $(PROGRAM) --script CLEANUP $(A)
+
 client: ../client.cpp
 	g++ -o ../client ../client.cpp
