@@ -8,6 +8,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <unistd.h>
+#include <unordered_map>
 
 // HTTP Library?
 #include "nlohmann/json.hpp"
@@ -375,9 +376,8 @@ private:
         return args;
     }
 
-public:
-
-    void login_admin(vector<string> args) {
+    void login_admin() {
+        vector<string> args = get_args(BASIC_AUTH);
         json j;
         j["username"] = args[0];
         j["password"] = args[1];
@@ -394,7 +394,8 @@ public:
         }
     }
 
-    void add_user(vector<string> args) {
+    void add_user() {
+        vector<string> args = get_args(BASIC_AUTH);
         json j;
         j["username"] = args[0];
         j["password"] = args[1];
@@ -425,7 +426,8 @@ public:
         }
     }
 
-    void login(vector<string> args) {
+    void login() {
+        vector<string> args = get_args(ADMIN_AUTH);
         json j;
         j["username"] = args[1];
         j["password"] = args[2];
@@ -459,7 +461,8 @@ public:
         }
     }
 
-    void add_movie(vector<string> args) {
+    void add_movie() {
+        vector<string> args = get_args(ADD_MOVIE_ARGS);
         json j;
         j["title"] = args[0];
         j["year"] = args[1];
@@ -488,7 +491,8 @@ public:
         cout << reply.get_message() << "\n";
     }
 
-    void update_movie(vector<string> args) {
+    void update_movie() {
+        vector<string> args = get_args(UPDATE_MOVIE_ARGS);
         json j;
         j["title"] = args[1];
         j["year"] = args[2];
@@ -577,51 +581,40 @@ public:
         cout << reply.get_message() << "\n";
     }
 
+    void exit() {
+        ::exit(0);
+    }
+
+     unordered_map<string, void(Client::*)()> command_map = {
+        {"exit", &Client::exit},
+        {"login_admin", &Client::login_admin},
+        {"add_user", &Client::add_user},
+        {"get_users", &Client::get_users},
+        {"delete_user", &Client::delete_user},
+        {"logout_admin", &Client::logout_admin},
+        {"login", &Client::login},
+        {"get_access", &Client::get_access},
+        {"get_movies", &Client::get_movies},
+        {"logout", &Client::logout},
+        {"add_movie", &Client::add_movie},
+        {"get_movie", &Client::get_movie},
+        {"delete_movie", &Client::delete_movie},
+        {"update_movie", &Client::update_movie},
+        {"get_collections", &Client::get_collections},
+        {"get_collection", &Client::get_collection},
+        {"add_collection", &Client::add_collection},
+        {"delete_collection", &Client::delete_collection},
+        {"add_movie_to_collection", &Client::add_movie_to_collection},
+        {"delete_movie_from_collection", &Client::delete_movie_from_collection}
+    };
+
+public:
     void run() {
         while (true) {
             string command;
             getline(cin, command);
-            // Single word command
-            if ( command == "exit" ) {
-                exit(0);
-            } else if ( command == "login_admin" ) {
-                login_admin(get_args(BASIC_AUTH));
-            } else if ( command == "add_user" ) {
-                add_user(get_args(BASIC_AUTH));
-            } else if ( command == "get_users" ) {
-                get_users();
-            } else if ( command == "delete_user" ) {
-                delete_user();
-            } else if ( command == "logout_admin" ) {
-                logout_admin();
-            } else if ( command == "login" ) {
-                login(get_args(ADMIN_AUTH));
-            } else if ( command == "get_access" ) {
-                get_access();
-            } else if ( command == "get_movies" ) {
-                get_movies();
-            } else if ( command == "logout" ) {
-                logout();
-            } else if ( command == "add_movie" ) {
-                add_movie(get_args(ADD_MOVIE_ARGS));
-            } else if ( command == "get_movie" ) {
-                get_movie();
-            } else if ( command == "delete_movie" ) {
-                delete_movie();
-            } else if ( command == "update_movie" ) {
-                update_movie(get_args(UPDATE_MOVIE_ARGS));
-            } else if ( command == "get_collections" ) {
-                get_collections();
-            } else if ( command == "get_collection" ) {
-                get_collection();
-            } else if ( command == "add_collection" ) {
-                add_collection();
-            } else if ( command == "delete_collection" ) {
-                delete_collection();
-            } else if ( command == "add_movie_to_collection" ) {
-                add_movie_to_collection();
-            } else if ( command == "delete_movie_from_collection" ) {
-                delete_movie_from_collection();
+            if ( command_map.find(command) != command_map.end() ) {
+                (this->*command_map[command])();
             } else {
                 cout << "I dont know what u want from me\n";
             }
