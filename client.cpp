@@ -1,4 +1,5 @@
 #include <cstddef>
+#include <functional>
 #include <string>
 #include <cstdio>
 #include <cstdlib>
@@ -9,8 +10,6 @@
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <unordered_map>
-
-// HTTP Library?
 #include "nlohmann/json.hpp"
 
 using json = nlohmann::json;
@@ -45,7 +44,6 @@ class HTTP_Reply {
             string http_version;
             iss2 >> http_version >> status_code;
             status_code_int = atoi(status_code.c_str());
-            // cout << "Return code: " << status_code << "\n";
 
             if ( status_code == "500" )
                 return;
@@ -57,14 +55,13 @@ class HTTP_Reply {
                 exit(1);
             }
             int content_length = atoi(response.substr(pos + 16, response.find("\r\n", pos + 16) - (pos + 16)).c_str());
-            // cout << "Content-Length(PARSED): " << content_length << "\n";
+
             pos = response.find("\r\n\r\n");
-            // cout << "Content-Length(REAL)" << response.substr(pos + 4).length() << "\n";
+
             // Check the content length
             if ( pos != string::npos ) {
                 // Valid HTTP response
                 // +4 bcz of \r\n\r\n
-                // cout << "Data:\n" << response.substr(pos + 4) << "\n";
                 data = json::parse(response.substr(pos + 4));
             } else {
                 cout << "ERROR: Invalid HTTP response\n";
@@ -135,65 +132,15 @@ class HTTP_Reply {
         json get_data() {
             return data;
         }
-};
 
-class HTTP_Reply_get_movies : HTTP_Reply {
-    public:
-        HTTP_Reply_get_movies(HTTP_Reply reply) : HTTP_Reply(reply.get_response()) {}
-
-        string get_message() {
+        string process_data_for_each(string field, function<string(json)> func) {
             string ret;
-            if ( data.contains("movies") ) {
-                ret = "SUCCES:\n";
-                // On succes casually dump the list of users and their private data
-                for ( auto elem : data["movies"] ) {
-                    ret += "#";
-                    ret += to_string(elem["id"]);
-                    ret += " ";
-                    ret += elem["title"];
-                    // ret += ":";
-                    // ret += elem["password"];
-                    // ret += elem.dump();
-                    ret += "\n";
+            if ( data.contains(field) ) {
+                for ( auto elem : data[field] ) {
+                    ret += func(elem) + "\n";
                 }
-                // ret += data["movies"].dump();
-            } else if ( data.contains("error") ) {
-                ret = "ERROR: ";
-                ret += data["error"];
             } else {
-                ret = "ERROR SERVER PROBLEM: ";
-                ret += status_code;
-            }
-            return ret;
-        }
-};
-
-class HTTP_Reply_get_users : HTTP_Reply {
-    public:
-        HTTP_Reply_get_users(HTTP_Reply reply) : HTTP_Reply(reply.get_response()) {}
-
-        string get_message() {
-            string ret;
-            if ( data.contains("users") ) {
-                ret = "SUCCES:\n";
-                // On succes casually dump the list of users and their private data
-                for ( auto elem : data["users"] ) {
-                    ret += "#";
-                    ret += to_string(elem["id"]);
-                    ret += " ";
-                    ret += elem["username"];
-                    ret += ":";
-                    ret += elem["password"];
-                    ret += "\n";
-
-                }
-                // ret += data["users"].dump();
-            } else if ( data.contains("error") ) {
-                ret = "ERROR: ";
-                ret += data["error"];
-            } else {
-                ret = "ERROR SERVER PROBLEM: ";
-                ret += status_code;
+                ret += get_message();
             }
             return ret;
         }
@@ -238,13 +185,21 @@ class HTTP_Request {
         }
 
         HTTP_Request& add_session_id(string session_id) {
+            if ( session_id == "" ) {
+                this->auth_header = false;
+            } else {
+                this->auth_header = true;
+            }
             this->session_id = session_id;
-            this->auth_header = true;
             return *this;
         }
 
         HTTP_Request& add_JWT_token(string token) {
-            this->session_id_JWT = token;
+            if ( token == "" ) {
+                this->auth_header_JWT = false;
+            } else {
+                this->auth_header_JWT = true;
+            }
             this->auth_header_JWT = true;
             return *this;
         }
@@ -279,12 +234,20 @@ class Connection {
         }
 
         void add_JWT_token(string token) {
-            this->auth_JWT = true;
+            if ( token == "" ) {
+                this->auth_JWT = false;
+            } else {
+                this->auth_JWT = true;
+            }
             this->session_id_JWT = token;
         }
 
         void add_session_id(string session_id) {
-            this->auth_header = true;
+            if ( session_id == "" ) {
+                this->auth_header = false;
+            } else {
+                this->auth_header = true;
+            }
             this->session_id = session_id;
         }
 
@@ -370,8 +333,7 @@ private:
     vector<string> get_args(vector<string> prompts) {
         vector<string> args;
         for ( auto prompt : prompts ) {
-            string input = get_input(prompt);
-            args.push_back(input);
+            args.push_back(get_input(prompt));
         }
         return args;
     }
@@ -405,8 +367,10 @@ private:
     }
 
     void get_users() {
-        HTTP_Reply_get_users reply(c.prepare_send(json(), "/api/v1/tema/admin/users", "GET").send());
-        cout << reply.get_message() << "\n";
+        HTTP_Reply reply = c.prepare_send(json(), "/api/v1/tema/admin/users", "GET").send();
+        cout << reply.process_data_for_each("users", [](json elem) {
+            return "#" + elem["id"].get<string>() + " " + elem["username"].get<string>() + ":" + elem["password"].get<string>();
+        }) << "\n";
     }
 
     void delete_user() {
@@ -445,8 +409,9 @@ private:
     }
 
     void get_movies() {
-        HTTP_Reply_get_movies reply(c.prepare_send(json(), "/api/v1/tema/library/movies", "GET").send());
-        cout << reply.get_message() << "\n";
+        HTTP_Reply reply = c.prepare_send(json(), "/api/v1/tema/library/movies", "GET").send();
+        cout << reply.process_data_for_each("movies", [](json elem) {
+            return "#" + elem["id"].get<string>() + " " + elem["title"].get<string>();}) << "\n";
     }
 
     void logout() {
