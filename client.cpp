@@ -170,6 +170,7 @@ class HTTP_Request {
         string build() {
             string request = method + " " + endpoint + " HTTP/1.1\r\n"
                             "Host: " + HOST + "\r\n";
+            request += "Connection: close\r\n";
             if ( auth_header_JWT ) {
                 request += "Authorization: Bearer " + session_id_JWT + "\r\n";
             }
@@ -200,7 +201,7 @@ class HTTP_Request {
             } else {
                 this->auth_header_JWT = true;
             }
-            this->auth_header_JWT = true;
+            this->session_id_JWT = token;
             return *this;
         }
 };
@@ -282,6 +283,9 @@ class Connection {
             }
             request = builder.build();
             request += j.dump();
+
+            // cout << "Request:\n" << request << "\n";
+
             int sent = 0;
             while ( sent <= request.size() ) {
                 int val = ::send(sockfd, request.c_str() + sent, request.size(), 0);
@@ -291,12 +295,16 @@ class Connection {
                 sent += val;
             }
 
+            // cout << "Bytes sent: " << sent << "\n";
+
             char buffer[8192];
             int read = 0;
             // Receive response
             while ( true ) {
                 int valread = recv(sockfd, buffer + read, 8192, 0);
                 // cout << "Bytes read: " << valread << "\n";
+                // cout << "Read: " << buffer << "\n";
+
                 if ( valread <= 0 ) {
                     break;
                 }
@@ -304,6 +312,23 @@ class Connection {
                 if ( read >= 8192 ) {
                     cout << "WE NEED BIGGER BUFFER\n";
                     break;
+                }
+
+                // If we found EOF, we can get the content length
+                if ( strstr(buffer, "\r\n\r\n") != NULL ) {
+                    // cout << "Found EOF\n";
+                    if ( strstr(buffer, "Content-Length:") != NULL ) {
+                        // cout << "Found Content-Length\n";
+                        int content_length = atoi(strstr(buffer, "Content-Length:") + 16);
+                        int header_length = strstr(buffer, "\r\n\r\n") - buffer + 4;
+                        // cout << "Content length: " << content_length << "\n";
+                        // cout << "Header length: " << header_length << "\n";
+                        // cout << "Read: " << read << "\n";
+                        if ( read >= content_length + header_length ) {
+                            break;
+                        }
+                        // break;
+                    }
                 }
             }
             memset(buffer + read, 0, 8192 - read);
@@ -369,7 +394,7 @@ private:
     void get_users() {
         HTTP_Reply reply = c.prepare_send(json(), "/api/v1/tema/admin/users", "GET").send();
         cout << reply.process_data_for_each("users", [](json elem) {
-            return "#" + elem["id"].get<string>() + " " + elem["username"].get<string>() + ":" + elem["password"].get<string>();
+            return "#" + to_string(elem["id"]) + " " + elem["username"].get<string>() + ":" + elem["password"].get<string>();
         }) << "\n";
     }
 
@@ -411,7 +436,7 @@ private:
     void get_movies() {
         HTTP_Reply reply = c.prepare_send(json(), "/api/v1/tema/library/movies", "GET").send();
         cout << reply.process_data_for_each("movies", [](json elem) {
-            return "#" + elem["id"].get<string>() + " " + elem["title"].get<string>();}) << "\n";
+            return "#" + to_string(elem["id"]) + " " + elem["title"].get<string>();}) << "\n";
     }
 
     void logout() {
@@ -427,9 +452,9 @@ private:
         vector<string> args = get_args(ADD_MOVIE_ARGS);
         json j;
         j["title"] = args[0];
-        j["year"] = args[1];
+        j["year"] = stoi(args[1]);
         j["description"] = args[2];
-        j["rating"] = args[3];
+        j["rating"] = stod(args[3]);
         HTTP_Reply reply = c.prepare_send(j, "/api/v1/tema/library/movies", "POST").send();
         cout << reply.get_message() << "\n";
     }
