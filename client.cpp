@@ -19,6 +19,11 @@ using namespace std;
 #define PORT 8081
 #define HOST "63.32.125.183"
 
+#define BASIC_AUTH {"username=", "password="}
+#define ADMIN_AUTH {"admin_username=", "username=", "password="}
+#define UPDATE_MOVIE_ARGS {"id=", "title=", "year=", "description=", "rating="}
+#define ADD_MOVIE_ARGS {"title=", "year=", "description=", "rating="}
+
 class HTTP_Reply {
     protected:
         string response;
@@ -126,8 +131,8 @@ class HTTP_Reply {
             }
         }
 
-        string get_data() {
-            return data.dump();
+        json get_data() {
+            return data;
         }
 };
 
@@ -338,7 +343,7 @@ class Connection {
                 }
             }
             memset(buffer + read, 0, 8192 - read);
-            cout << "Reply:\n" << buffer << "\n";
+            // cout << "Reply:\n" << buffer << "\n";
 
             HTTP_Reply parser(buffer);
 
@@ -353,20 +358,29 @@ class Connection {
 class Client {
 private:
     Connection c;
+
+    string get_input(string prompt) {
+        string input;
+        cout << prompt;
+        getline(cin, input);
+        return input;
+    }
+
+    vector<string> get_args(vector<string> prompts) {
+        vector<string> args;
+        for ( auto prompt : prompts ) {
+            string input = get_input(prompt);
+            args.push_back(input);
+        }
+        return args;
+    }
+
 public:
 
-    void login_admin() {
-        string username, password;
-        cout << "username=";
-        cin >> username;
-        cin.ignore();
-        cout << "password=";
-        cin >> password;
-        cin.ignore();
-
+    void login_admin(vector<string> args) {
         json j;
-        j["username"] = username;
-        j["password"] = password;
+        j["username"] = args[0];
+        j["password"] = args[1];
 
         HTTP_Reply reply = c.prepare_send(j, "/api/v1/tema/admin/login", "POST").send();;
         while ( reply.is_internal_error() ) {
@@ -380,18 +394,10 @@ public:
         }
     }
 
-    void add_user() {
-        string username, password;
-        cout << "username=";
-        cin >> username;
-        cin.ignore();
-        cout << "password=";
-        cin >> password;
-        cin.ignore();
-
+    void add_user(vector<string> args) {
         json j;
-        j["username"] = username;
-        j["password"] = password;
+        j["username"] = args[0];
+        j["password"] = args[1];
 
         HTTP_Reply reply = c.prepare_send(j, "/api/v1/tema/admin/users", "POST").send();
         cout << reply.get_message() << "\n";
@@ -419,21 +425,11 @@ public:
         }
     }
 
-    void login() {
-        string admin_user, username, password;
-        cout << "admin_username=";
-        cin >> admin_user;
-        cin.ignore();
-        cout << "username=";
-        cin >> username;
-        cin.ignore();
-        cout << "password=";
-        cin >> password;
-        cin.ignore();
+    void login(vector<string> args) {
         json j;
-        j["username"] = username;
-        j["password"] = password;
-        j["admin_username"] = admin_user;
+        j["username"] = args[1];
+        j["password"] = args[2];
+        j["admin_username"] = args[0];
         HTTP_Reply reply = c.prepare_send(j, "/api/v1/tema/user/login", "POST").send();
         cout << reply.get_message() << "\n";
         if ( reply.is_success() ) {
@@ -463,28 +459,12 @@ public:
         }
     }
 
-    void add_movie() {
-        string id, title, desc, rating, year;
-        cout << "id=";
-        cin >> id;
-        cin.ignore();
-        cout << "title=";
-        cin >> title;
-        cin.ignore();
-        cout << "year=";
-        cin >> year;
-        cin.ignore();
-        cout << "description=";
-        cin >> desc;
-        cin.ignore();
-        cout << "rating=";
-        cin >> rating;
-        cin.ignore();
+    void add_movie(vector<string> args) {
         json j;
-        j["title"] = title;
-        j["year"] = year;
-        j["description"] = desc;
-        j["rating"] = rating;
+        j["title"] = args[0];
+        j["year"] = args[1];
+        j["description"] = args[2];
+        j["rating"] = args[3];
         HTTP_Reply reply = c.prepare_send(j, "/api/v1/tema/library/movies", "POST").send();
         cout << reply.get_message() << "\n";
     }
@@ -496,7 +476,7 @@ public:
         cin.ignore();
         HTTP_Reply reply = c.prepare_send(json(), "/api/v1/tema/library/movies/" + id, "GET").send();
         cout << reply.get_message() << "\n";
-        cout << reply.get_data() << "\n";
+        cout << reply.get_data().dump() << "\n";
     }
 
     void delete_movie() {
@@ -508,47 +488,106 @@ public:
         cout << reply.get_message() << "\n";
     }
 
-    void update_movie() {
-        string id, title, desc, rating, year;
+    void update_movie(vector<string> args) {
+        json j;
+        j["title"] = args[1];
+        j["year"] = args[2];
+        j["description"] = args[3];
+        j["rating"] = args[4];
+        HTTP_Reply reply = c.prepare_send(j, "/api/v1/tema/library/movies/" + args[0], "PUT").send();
+        cout << reply.get_message() << "\n";
+    }
+
+    void get_collections() {
+        HTTP_Reply reply = c.prepare_send(json(), "/api/v1/tema/library/collections", "GET").send();
+        cout << reply.get_message() << "\n";
+        if ( reply.is_success() ) {
+            cout << reply.get_data().dump() << "\n";
+        }
+    }
+
+    void get_collection() {
+        string id;
         cout << "id=";
-        cin >> id;
-        cin.ignore();
+        getline(cin, id);
+        HTTP_Reply reply = c.prepare_send(json(), "/api/v1/tema/library/collections/" + id, "GET").send();
+        cout << reply.get_message() << "\n";
+        if ( reply.is_success() ) {
+            cout << reply.get_data().dump() << "\n";
+        }
+    }
+
+    void add_collection() {
+        bool no_errors = true;
+        string title;
         cout << "title=";
-        cin >> title;
-        cin.ignore();
-        cout << "year=";
-        cin >> year;
-        cin.ignore();
-        cout << "description=";
-        cin >> desc;
-        cin.ignore();
-        cout << "rating=";
-        cin >> rating;
-        cin.ignore();
+        getline(cin, title);
         json j;
         j["title"] = title;
-        j["year"] = year;
-        j["description"] = desc;
-        j["rating"] = rating;
-        HTTP_Reply reply = c.prepare_send(j, "/api/v1/tema/library/movies/" + id, "PUT").send();
+        HTTP_Reply reply = c.prepare_send(j, "/api/v1/tema/library/collections", "POST").send();
+        if ( !reply.is_success() ) {
+            no_errors = false;
+            cout << reply.get_message() << "\n";
+        }
+        string num_movies;
+        cout << "num_movies=";
+        getline(cin, num_movies);
+        cout << reply.get_message() << "\n";
+        if ( no_errors ) {
+            for ( int i = 0; i < atoi(num_movies.c_str()); i++ ) {
+                string id;
+                cout << "movie_id" << i << "=";
+                getline(cin, id);
+                json j;
+                j["id"] = id;
+                HTTP_Reply reply2 = c.prepare_send(j, "/api/v1/tema/library/collections/" + title + "/movies", "POST").send();
+                cout << reply2.get_message() << "\n";
+            }
+        }
+    }
+
+    void delete_collection() {
+        string id;
+        cout << "id=";
+        getline(cin, id);
+        cin.ignore();
+        HTTP_Reply reply = c.prepare_send(json(), "/api/v1/tema/library/collections/" + id, "DELETE").send();
+        cout << reply.get_message() << "\n";
+    }
+
+    void add_movie_to_collection() {
+        string id, collection_id;
+        cout << "id=";
+        getline(cin, id);
+        cout << "collectionId=";
+        getline(cin, collection_id);
+        json j;
+        j["id"] = id;
+        HTTP_Reply reply = c.prepare_send(j, "/api/v1/tema/library/collections/" + collection_id + "/movies", "POST").send();
+        cout << reply.get_message() << "\n";
+    }
+
+    void delete_movie_from_collection() {
+        string id, collection_id;
+        cout << "id=";
+        getline(cin, id);
+        cout << "collectionId=";
+        getline(cin, collection_id);
+        HTTP_Reply reply = c.prepare_send(json(), "/api/v1/tema/library/collections/" + collection_id + "/movies/" + id, "DELETE").send();
         cout << reply.get_message() << "\n";
     }
 
     void run() {
         while (true) {
-            string line(100, '\0');
-            getline(cin, line);
-            // istringstream used to parse the line
-            istringstream iss(line);
             string command;
-            iss >> command;
+            getline(cin, command);
             // Single word command
             if ( command == "exit" ) {
                 exit(0);
             } else if ( command == "login_admin" ) {
-                login_admin();
+                login_admin(get_args(BASIC_AUTH));
             } else if ( command == "add_user" ) {
-                add_user();
+                add_user(get_args(BASIC_AUTH));
             } else if ( command == "get_users" ) {
                 get_users();
             } else if ( command == "delete_user" ) {
@@ -556,7 +595,7 @@ public:
             } else if ( command == "logout_admin" ) {
                 logout_admin();
             } else if ( command == "login" ) {
-                login();
+                login(get_args(ADMIN_AUTH));
             } else if ( command == "get_access" ) {
                 get_access();
             } else if ( command == "get_movies" ) {
@@ -564,13 +603,25 @@ public:
             } else if ( command == "logout" ) {
                 logout();
             } else if ( command == "add_movie" ) {
-                add_movie();
+                add_movie(get_args(ADD_MOVIE_ARGS));
             } else if ( command == "get_movie" ) {
                 get_movie();
             } else if ( command == "delete_movie" ) {
                 delete_movie();
             } else if ( command == "update_movie" ) {
-                update_movie();
+                update_movie(get_args(UPDATE_MOVIE_ARGS));
+            } else if ( command == "get_collections" ) {
+                get_collections();
+            } else if ( command == "get_collection" ) {
+                get_collection();
+            } else if ( command == "add_collection" ) {
+                add_collection();
+            } else if ( command == "delete_collection" ) {
+                delete_collection();
+            } else if ( command == "add_movie_to_collection" ) {
+                add_movie_to_collection();
+            } else if ( command == "delete_movie_from_collection" ) {
+                delete_movie_from_collection();
             } else {
                 cout << "I dont know what u want from me\n";
             }
