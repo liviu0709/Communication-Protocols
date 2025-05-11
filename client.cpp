@@ -410,10 +410,7 @@ private:
     }
 
     void delete_user() {
-        cout << "username=";
-        string username;
-        cin >> username;
-        cin.ignore();
+        string username = get_input("username=");
         HTTP_Reply reply = c.prepare_send(json(), "/api/v1/tema/admin/users/" + username, "DELETE").send();
         cout << reply.get_message() << "\n";
     }
@@ -473,20 +470,14 @@ private:
     }
 
     void get_movie() {
-        string id;
-        cout << "id=";
-        cin >> id;
-        cin.ignore();
+        string id = get_input("id=");
         HTTP_Reply reply = c.prepare_send(json(), "/api/v1/tema/library/movies/" + id, "GET").send();
         cout << reply.get_message() << "\n";
         cout << reply.get_data().dump() << "\n";
     }
 
     void delete_movie() {
-        string id;
-        cout << "id=";
-        cin >> id;
-        cin.ignore();
+        string id = get_input("id=");
         HTTP_Reply reply = c.prepare_send(json(), "/api/v1/tema/library/movies/" + id, "DELETE").send();
         cout << reply.get_message() << "\n";
     }
@@ -511,9 +502,7 @@ private:
     }
 
     void get_collection() {
-        string id;
-        cout << "id=";
-        getline(cin, id);
+        string id = get_input("id=");
         HTTP_Reply reply = c.prepare_send(json(), "/api/v1/tema/library/collections/" + id, "GET").send();
         cout << reply.get_message() << "\n";
         if ( reply.is_success() ) {
@@ -551,10 +540,7 @@ private:
     }
 
     void delete_collection() {
-        string id;
-        cout << "id=";
-        getline(cin, id);
-        cin.ignore();
+        string id = get_input("id=");
         HTTP_Reply reply = c.prepare_send(json(), "/api/v1/tema/library/collections/" + id, "DELETE").send();
         cout << reply.get_message() << "\n";
     }
@@ -585,7 +571,7 @@ private:
         ::exit(0);
     }
 
-     unordered_map<string, void(Client::*)()> command_map = {
+    unordered_map<string, void(Client::*)()> command_map = {
         {"exit", &Client::exit},
         {"login_admin", &Client::login_admin},
         {"add_user", &Client::add_user},
