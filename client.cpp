@@ -343,7 +343,7 @@ class Connection {
 
             // Server cant keep up? Lets contribute to the server load
             while ( parser.is_internal_error() ) {
-                cout << "Internal server thing, retrying...\n";
+                // cout << "Internal server thing, retrying...\n";
                 parser = send();
             }
             // cout << "Reply:\n" << buffer << "\n";
@@ -397,18 +397,25 @@ private:
                 return "#" + to_string(elem["id"]) + " " + elem["username"].get<string>() + ":" + elem["password"].get<string>();
     };
 
+    void handle_reply(HTTP_Reply& reply, const string& success_msg, function<void()> on_success = nullptr) {
+        if (reply.is_success()) {
+            cout << success_msg << "\n";
+            if (on_success)
+                on_success();
+        } else {
+            cout << reply.get_message() << "\n";
+        }
+    }
+
     void login_admin() {
         vector<string> args = get_args(BASIC_AUTH);
         json j;
         j["username"] = args[0];
         j["password"] = args[1];
         HTTP_Reply reply = c.prepare_send(j, "/api/v1/tema/admin/login", "POST").send();
-        if ( reply.is_success() ) {
-            cout << "SUCCES: Admin autentificat\n";
+        handle_reply(reply, "SUCCES: Admin autentificat", [this, &reply]() {
             c.add_session_id(reply.get_session_id());
-        } else {
-            cout << reply.get_message() << "\n";
-        }
+        });
     }
 
     void add_user() {
@@ -417,41 +424,27 @@ private:
         j["username"] = args[0];
         j["password"] = args[1];
         HTTP_Reply reply = c.prepare_send(j, "/api/v1/tema/admin/users", "POST").send();
-        if ( reply.is_success() ) {
-            cout << "SUCCES: Utilizator adaugat\n";
-        } else {
-            cout << reply.get_message() << "\n";
-        }
+        handle_reply(reply, "SUCCES: Utilizator adaugat");
     }
 
     void get_users() {
         HTTP_Reply reply = c.prepare_send(json(), "/api/v1/tema/admin/users", "GET").send();
-        if ( reply.is_success() ) {
-            cout << "SUCCES: Lista utilizatori\n";
+        handle_reply(reply, "SUCCES: Lista utilizatori", [this, &reply]() {
             cout << reply.process_data_for_each("users", print_id_username) << "\n";
-        } else {
-            cout << reply.get_message() << "\n";
-        }
+        });
     }
 
     void delete_user() {
         string username = get_input("username=");
         HTTP_Reply reply = c.prepare_send(json(), "/api/v1/tema/admin/users/" + username, "DELETE").send();
-        if ( reply.is_success() ) {
-            cout << "SUCCES: utilizator sters\n";
-        } else {
-            cout << reply.get_message() << "\n";
-        }
+        handle_reply(reply, "SUCCES: utilizator sters");
     }
 
     void logout_admin() {
         HTTP_Reply reply = c.prepare_send(json(), "/api/v1/tema/admin/logout", "GET").send();
-        if ( reply.is_success() ) {
+        handle_reply(reply, "SUCCES: Admin delogat", [this]() {
             c.add_session_id("");
-            cout << "SUCCES: Admin delogat\n";
-        } else {
-            cout << reply.get_message() << "\n";
-        }
+        });
     }
 
     void login() {
@@ -461,43 +454,31 @@ private:
         j["password"] = args[2];
         j["admin_username"] = args[0];
         HTTP_Reply reply = c.prepare_send(j, "/api/v1/tema/user/login", "POST").send();
-        if ( reply.is_success() ) {
-            cout << "SUCCES: Autentificare reusita\n";
+        handle_reply(reply, "SUCCES: Autentificare reusita", [this, &reply]() {
             c.add_session_id(reply.get_session_id());
-        } else {
-            cout << reply.get_message() << "\n";
-        }
+        });
     }
 
     void get_access() {
         HTTP_Reply reply = c.prepare_send(json(), "/api/v1/tema/library/access", "GET").send();
-        if ( reply.is_success() ) {
+        handle_reply(reply, "SUCCES: Token JWT obtinut", [this, &reply]() {
             c.add_JWT_token(reply.get_JWT_token());
-            cout << "SUCCES: Token JWT obtinut\n";
-        } else {
-            cout << reply.get_message() << "\n";
-        }
+        });
     }
 
     void get_movies() {
         HTTP_Reply reply = c.prepare_send(json(), "/api/v1/tema/library/movies", "GET").send();
-        if ( reply.is_success() ) {
-            cout << "SUCCES: Lista filmelor\n";
+        handle_reply(reply, "SUCCES: Lista filmelor", [this, &reply]() {
             cout << reply.process_data_for_each("movies", print_id_title) << "\n";
-        } else {
-            cout << reply.get_message() << "\n";
-        }
+        });
     }
 
     void logout() {
         HTTP_Reply reply = c.prepare_send(json(), "/api/v1/tema/user/logout", "GET").send();
-        if ( reply.is_success() ) {
+        handle_reply(reply, "SUCCES: Utilizator delogat", [this]() {
             c.add_session_id("");
             c.add_JWT_token("");
-            cout << "SUCCES: Utilizator delogat\n";
-        } else {
-            cout << reply.get_message() << "\n";
-        }
+        });
     }
 
     void add_movie() {
@@ -508,35 +489,25 @@ private:
         j["description"] = args[1];
         j["rating"] = get_input_number<double>("rating=");
         HTTP_Reply reply = c.prepare_send(j, "/api/v1/tema/library/movies", "POST").send();
-        if ( reply.is_success() ) {
-            cout << "SUCCES: Film adaugat\n";
-        } else {
-            cout << reply.get_message() << "\n";
-        }
+        handle_reply(reply, "SUCCES: Film adaugat");
     }
 
     void get_movie() {
         string id = to_string(get_input_number<int>("id="));
         HTTP_Reply reply = c.prepare_send(json(), "/api/v1/tema/library/movies/" + id, "GET").send();
-        cout << reply.get_message() << "\n";
-        if ( reply.is_success() ) {
-            cout << "Movie data:\n";
+        handle_reply(reply, "SUCCES - Movie data", [this, &reply]() {
             cout << "title: " << reply.get_data()["title"].get<string>() << "\n";
             cout << "year: " << reply.get_data()["year"].get<int>() << "\n";
             cout << "description: " << reply.get_data()["description"].get<string>() << "\n";
             // Why string? Ask the server
             cout << "rating: " << reply.get_data()["rating"].get<string>() << "\n";
-        }
+        });
     }
 
     void delete_movie() {
         string id = to_string(get_input_number<int>("id="));
         HTTP_Reply reply = c.prepare_send(json(), "/api/v1/tema/library/movies/" + id, "DELETE").send();
-        if ( reply.is_success() ) {
-            cout << "SUCCES: Film sters\n";
-        } else {
-            cout << reply.get_message() << "\n";
-        }
+        handle_reply(reply, "SUCCES: Film sters");
     }
 
     void update_movie() {
@@ -547,34 +518,24 @@ private:
         j["description"] = args[1];
         j["rating"] = get_input_number<double>("rating=");
         HTTP_Reply reply = c.prepare_send(j, "/api/v1/tema/library/movies/" + to_string(get_input_number<int>("id=")), "PUT").send();
-        if ( reply.is_success() ) {
-            cout << "SUCCES: Film actualizat\n";
-        } else {
-            cout << reply.get_message() << "\n";
-        }
+        handle_reply(reply, "SUCCES: Film actualizat");
     }
 
     void get_collections() {
         HTTP_Reply reply = c.prepare_send(json(), "/api/v1/tema/library/collections", "GET").send();
-        if ( reply.is_success() ) {
-            cout << "SUCCES: Lista colectiilor\n";
+        handle_reply(reply, "SUCCES: Lista colectiilor", [this, &reply]() {
             cout << reply.process_data_for_each("collections", print_id_title) << "\n";
-        } else {
-            cout << reply.get_message() << "\n";
-        }
+        });
     }
 
     void get_collection_by_id(int id) {
         HTTP_Reply reply = c.prepare_send(json(), "/api/v1/tema/library/collections/" + to_string(id), "GET").send();
-        if ( reply.is_success() ) {
-            cout << "SUCCES: detalii colectie\n";
+        handle_reply(reply, "SUCCES: detalii colectie", [this, &reply]() {
             json data = reply.get_data();
             cout << "title: " << data["title"].get<string>() << "\n";
             cout << "owner: " << data["owner"].get<string>() << "\n";
             cout << reply.process_data_for_each("movies", print_id_title) << "\n";
-        } else {
-            cout << reply.get_message() << "\n";
-        }
+        });
     }
 
     void get_collection() {
@@ -610,11 +571,7 @@ private:
     void delete_collection() {
         string id = to_string(get_input_number<int>("id="));
         HTTP_Reply reply = c.prepare_send(json(), "/api/v1/tema/library/collections/" + id, "DELETE").send();
-        if ( reply.is_success() ) {
-            cout << "SUCCES: Colectie stearsa\n";
-        } else {
-            cout << reply.get_message() << "\n";
-        }
+        handle_reply(reply, "SUCCES: Colectie stearsa");
     }
 
     void add_movie_to_collection() {
@@ -623,22 +580,14 @@ private:
         json j;
         j["id"] = id;
         HTTP_Reply reply = c.prepare_send(j, "/api/v1/tema/library/collections/" + collection_id + "/movies", "POST").send();
-        if ( reply.is_success() ) {
-            cout << "SUCCES: Film adaugat in colectie\n";
-        } else {
-            cout << reply.get_message() << "\n";
-        }
+        handle_reply(reply, "SUCCES: Film adaugat in colectie");
     }
 
     void delete_movie_from_collection() {
         string id = to_string(get_input_number<int>("id="));
         string collection_id = to_string(get_input_number<int>("collectionId="));
         HTTP_Reply reply = c.prepare_send(json(), "/api/v1/tema/library/collections/" + collection_id + "/movies/" + id, "DELETE").send();
-        if ( reply.is_success() ) {
-            cout << "SUCCES: Film sters din colectie\n";
-        } else {
-            cout << reply.get_message() << "\n";
-        }
+        handle_reply(reply, "SUCCES: Film sters din colectie");
     }
 
     void exit() {
