@@ -21,8 +21,8 @@ using namespace std;
 
 #define BASIC_AUTH {"username=", "password="}
 #define ADMIN_AUTH {"admin_username=", "username=", "password="}
-#define UPDATE_MOVIE_ARGS {"id=", "title=", "year=", "description=", "rating="}
-#define ADD_MOVIE_ARGS {"title=", "year=", "description=", "rating="}
+#define MOVIE_STRING_ARGS {"title=", "description="}
+
 
 class HTTP_Reply {
     protected:
@@ -136,6 +136,9 @@ class HTTP_Reply {
         string process_data_for_each(string field, function<string(json)> func) {
             string ret;
             if ( data.contains(field) ) {
+                sort(data[field].begin(), data[field].end(), [](const json& a, const json& b) {
+                    return a["id"].get<int>() < b["id"].get<int>();
+                });
                 for ( auto elem : data[field] ) {
                     ret += func(elem) + "\n";
                 }
@@ -355,6 +358,22 @@ private:
         return input;
     }
 
+    template<typename T>
+    T get_input_number(string prompt) {
+        T id;
+        while ( true ) {
+            string input = get_input(prompt);
+            istringstream iss(input);
+            iss >> id;
+            if ( iss.fail() ) {
+                cout << "Id is supposed to be a number(input received):" << input << "\n";
+                continue;
+            }
+            break;
+        }
+        return id;
+    }
+
     vector<string> get_args(vector<string> prompts) {
         vector<string> args;
         for ( auto prompt : prompts ) {
@@ -435,8 +454,12 @@ private:
 
     void get_movies() {
         HTTP_Reply reply = c.prepare_send(json(), "/api/v1/tema/library/movies", "GET").send();
-        cout << reply.process_data_for_each("movies", [](json elem) {
-            return "#" + to_string(elem["id"]) + " " + elem["title"].get<string>();}) << "\n";
+        if ( reply.is_success() ) {
+            cout << reply.process_data_for_each("movies", [](json elem) {
+                return "#" + to_string(elem["id"]) + " " + elem["title"].get<string>();}) << "\n";
+        } else {
+            cout << reply.get_message() << "\n";
+        }
     }
 
     void logout() {
@@ -449,37 +472,37 @@ private:
     }
 
     void add_movie() {
-        vector<string> args = get_args(ADD_MOVIE_ARGS);
+        vector<string> args = get_args(MOVIE_STRING_ARGS);
         json j;
         j["title"] = args[0];
-        j["year"] = stoi(args[1]);
-        j["description"] = args[2];
-        j["rating"] = stod(args[3]);
+        j["year"] = get_input_number<int>("year=");
+        j["description"] = args[1];
+        j["rating"] = get_input_number<double>("rating=");
         HTTP_Reply reply = c.prepare_send(j, "/api/v1/tema/library/movies", "POST").send();
         cout << reply.get_message() << "\n";
     }
 
     void get_movie() {
-        string id = get_input("id=");
+        string id = to_string(get_input_number<int>("id="));
         HTTP_Reply reply = c.prepare_send(json(), "/api/v1/tema/library/movies/" + id, "GET").send();
         cout << reply.get_message() << "\n";
         cout << reply.get_data().dump() << "\n";
     }
 
     void delete_movie() {
-        string id = get_input("id=");
+        string id = to_string(get_input_number<int>("id="));
         HTTP_Reply reply = c.prepare_send(json(), "/api/v1/tema/library/movies/" + id, "DELETE").send();
         cout << reply.get_message() << "\n";
     }
 
     void update_movie() {
-        vector<string> args = get_args(UPDATE_MOVIE_ARGS);
+        vector<string> args = get_args(MOVIE_STRING_ARGS);
         json j;
-        j["title"] = args[1];
-        j["year"] = args[2];
-        j["description"] = args[3];
-        j["rating"] = args[4];
-        HTTP_Reply reply = c.prepare_send(j, "/api/v1/tema/library/movies/" + args[0], "PUT").send();
+        j["title"] = args[0];
+        j["year"] = get_input_number<int>("year=");
+        j["description"] = args[1];
+        j["rating"] = get_input_number<double>("rating=");
+        HTTP_Reply reply = c.prepare_send(j, "/api/v1/tema/library/movies/" + to_string(get_input_number<int>("id=")), "PUT").send();
         cout << reply.get_message() << "\n";
     }
 
@@ -487,13 +510,14 @@ private:
         HTTP_Reply reply = c.prepare_send(json(), "/api/v1/tema/library/collections", "GET").send();
         cout << reply.get_message() << "\n";
         if ( reply.is_success() ) {
-            cout << reply.get_data().dump() << "\n";
+            cout << reply.process_data_for_each("collections", [](json elem) {
+            return "#" + to_string(elem["id"]) + " " + elem["title"].get<string>();}) << "\n";
         }
     }
 
     void get_collection() {
-        string id = get_input("id=");
-        HTTP_Reply reply = c.prepare_send(json(), "/api/v1/tema/library/collections/" + id, "GET").send();
+        int id = get_input_number<int>("id=");
+        HTTP_Reply reply = c.prepare_send(json(), "/api/v1/tema/library/collections/" + to_string(id), "GET").send();
         cout << reply.get_message() << "\n";
         if ( reply.is_success() ) {
             cout << reply.get_data().dump() << "\n";
@@ -502,45 +526,37 @@ private:
 
     void add_collection() {
         bool no_errors = true;
-        string title;
-        cout << "title=";
-        getline(cin, title);
+        string title = get_input("title=");
         json j;
         j["title"] = title;
         HTTP_Reply reply = c.prepare_send(j, "/api/v1/tema/library/collections", "POST").send();
         if ( !reply.is_success() ) {
             no_errors = false;
             cout << reply.get_message() << "\n";
+            return;
         }
-        string num_movies;
-        cout << "num_movies=";
-        getline(cin, num_movies);
-        cout << reply.get_message() << "\n";
-        if ( no_errors ) {
-            for ( int i = 0; i < atoi(num_movies.c_str()); i++ ) {
-                string id;
-                cout << "movie_id" << i << "=";
-                getline(cin, id);
-                json j;
-                j["id"] = id;
-                HTTP_Reply reply2 = c.prepare_send(j, "/api/v1/tema/library/collections/" + title + "/movies", "POST").send();
-                cout << reply2.get_message() << "\n";
-            }
+        string collection_id = to_string(reply.get_data()["id"].get<int>());
+        int num_movies = stoi(get_input("num_movies="));
+
+        for ( int i = 0; i < num_movies; i++ ) {
+            json j;
+            j["id"] = get_input_number<int>("movie_id[" + to_string(i) + "]=");
+            HTTP_Reply reply2 = c.prepare_send(j, "/api/v1/tema/library/collections/" + collection_id + "/movies", "POST").send();
+            cout << reply2.get_message() << "\n";
         }
+
+        cout << "SUCCES: collection initialized\n";
     }
 
     void delete_collection() {
-        string id = get_input("id=");
+        string id = to_string(get_input_number<int>("id="));
         HTTP_Reply reply = c.prepare_send(json(), "/api/v1/tema/library/collections/" + id, "DELETE").send();
         cout << reply.get_message() << "\n";
     }
 
     void add_movie_to_collection() {
-        string id, collection_id;
-        cout << "id=";
-        getline(cin, id);
-        cout << "collectionId=";
-        getline(cin, collection_id);
+        int id = get_input_number<int>("id=");
+        string collection_id = to_string(get_input_number<int>("collectionId="));
         json j;
         j["id"] = id;
         HTTP_Reply reply = c.prepare_send(j, "/api/v1/tema/library/collections/" + collection_id + "/movies", "POST").send();
@@ -548,11 +564,8 @@ private:
     }
 
     void delete_movie_from_collection() {
-        string id, collection_id;
-        cout << "id=";
-        getline(cin, id);
-        cout << "collectionId=";
-        getline(cin, collection_id);
+        string id = to_string(get_input_number<int>("id="));
+        string collection_id = to_string(get_input_number<int>("collectionId="));
         HTTP_Reply reply = c.prepare_send(json(), "/api/v1/tema/library/collections/" + collection_id + "/movies/" + id, "DELETE").send();
         cout << reply.get_message() << "\n";
     }
