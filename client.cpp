@@ -531,8 +531,7 @@ private:
     void add_collection() {
         bool no_errors = true;
         string title = get_input("title=");
-        json j;
-        j["title"] = title;
+        json j = {{"title", title}};
         HTTP_Reply reply = c.prepare_send(j, "/api/v1/tema/library/collections", "POST").send();
         if ( !reply.is_success() ) {
             no_errors = false;
@@ -542,8 +541,7 @@ private:
         string collection_id = to_string(reply.get_data()["id"].get<int>());
         int num_movies = get_input_number<int>("num_movies=");
         for ( int i = 0; i < num_movies; i++ ) {
-            json j;
-            j["id"] = get_input_number<int>("movie_id[" + to_string(i) + "]=");
+            json j = {{"id", get_input_number<int>("movie_id[" + to_string(i) + "]=")}};
             HTTP_Reply reply2 = c.prepare_send(j, "/api/v1/tema/library/collections/" + collection_id + "/movies", "POST").send();
             if ( !reply2.is_success() ) {
                 cout << reply2.get_message() << "\n";
@@ -562,8 +560,7 @@ private:
     void add_movie_to_collection() {
         int id = get_input_number<int>("id=");
         string collection_id = to_string(get_input_number<int>("collectionId="));
-        json j;
-        j["id"] = id;
+        json j = {{"id", id}};
         HTTP_Reply reply = c.prepare_send(j, "/api/v1/tema/library/collections/" + collection_id + "/movies", "POST").send();
         handle_reply(reply, "SUCCES: Film adaugat in colectie");
     }
