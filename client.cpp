@@ -34,7 +34,6 @@ class HTTP_Reply {
     public:
         HTTP_Reply(string response) {
             this->response = response;
-            // cout << "Response:\n" << response << "\n";
             // Parse the response
             istringstream iss(response);
             string line;
@@ -255,12 +254,7 @@ class Connection {
             this->session_id = session_id;
         }
 
-        // Not actually needed?
-        // string get_session_id() {
-        //     return session_id;
-        // }
-
-        HTTP_Reply send() {
+        void init_socket() {
             sockfd = socket(AF_INET, SOCK_STREAM, 0);
             if ( sockfd < 0 ) {
                 cout << "Error creating socket\n";
@@ -275,8 +269,15 @@ class Connection {
                 cout << "Connection failed\n";
                 exit(1);
             }
+        }
 
-            HTTP_Request builder(method, endpoint, "application/json", to_string(j.dump().size()));
+        HTTP_Reply send() {
+            init_socket();
+            string len = to_string(j.dump().size());
+            if ( j == json() ) {
+                len = "0";
+            }
+            HTTP_Request builder(method, endpoint, "application/json", len);
             string request;
             if ( auth_header ) {
                 builder = builder.add_session_id(session_id);
@@ -285,12 +286,14 @@ class Connection {
                 builder = builder.add_JWT_token(session_id_JWT);
             }
             request = builder.build();
-            request += j.dump();
+            if ( j != json() ) {
+                request += j.dump();
+            }
 
             // cout << "Request:\n" << request << "\n";
 
             int sent = 0;
-            while ( sent <= request.size() ) {
+            while ( sent < request.size() ) {
                 int val = ::send(sockfd, request.c_str() + sent, request.size(), 0);
                 if ( val <= 0 ) {
                     break;
@@ -298,16 +301,11 @@ class Connection {
                 sent += val;
             }
 
-            // cout << "Bytes sent: " << sent << "\n";
-
             char buffer[8192];
             int read = 0;
             // Receive response
             while ( true ) {
                 int valread = recv(sockfd, buffer + read, 8192, 0);
-                // cout << "Bytes read: " << valread << "\n";
-                // cout << "Read: " << buffer << "\n";
-
                 if ( valread <= 0 ) {
                     break;
                 }
@@ -319,39 +317,26 @@ class Connection {
 
                 // If we found EOF, we can get the content length
                 if ( strstr(buffer, "\r\n\r\n") != NULL ) {
-                    // cout << "Found EOF\n";
                     if ( strstr(buffer, "Content-Length:") != NULL ) {
-                        // cout << "Found Content-Length\n";
                         int content_length = atoi(strstr(buffer, "Content-Length:") + 16);
                         int header_length = strstr(buffer, "\r\n\r\n") - buffer + 4;
-                        // cout << "Content length: " << content_length << "\n";
-                        // cout << "Header length: " << header_length << "\n";
-                        // cout << "Read: " << read << "\n";
                         if ( read >= content_length + header_length ) {
                             break;
                         }
-                        // break;
                     }
                 }
             }
             memset(buffer + read, 0, 8192 - read);
-
             HTTP_Reply parser(buffer);
-
-
             close(sockfd);
-
             // Server cant keep up? Lets contribute to the server load
             while ( parser.is_internal_error() ) {
                 // cout << "Internal server thing, retrying...\n";
                 parser = send();
             }
-            // cout << "Reply:\n" << buffer << "\n";
-
+            // cout << "Response:\n" << buffer << "\n";
             return parser;
         }
-
-
 } ;
 
 class Client {
