@@ -19,6 +19,7 @@ using namespace std;
 #define PORT 8081
 #define HOST "63.32.125.183"
 
+#define BUFFER_SIZE 8192
 #define BASIC_AUTH {"username=", "password="}
 #define ADMIN_AUTH {"admin_username=", "username=", "password="}
 #define MOVIE_STRING_ARGS {"title=", "description="}
@@ -183,7 +184,6 @@ class HTTP_Request {
                 request += "Cookie: session=" + session_id + "\r\n";
             }
             request += "\r\n";
-            // cout << "Request:\n" << request << "\n";
             return request;
         }
 
@@ -289,9 +289,6 @@ class Connection {
             if ( j != json() ) {
                 request += j.dump();
             }
-
-            // cout << "Request:\n" << request << "\n";
-
             int sent = 0;
             while ( sent < request.size() ) {
                 int val = ::send(sockfd, request.c_str() + sent, request.size(), 0);
@@ -300,21 +297,19 @@ class Connection {
                 }
                 sent += val;
             }
-
-            char buffer[8192];
+            char buffer[BUFFER_SIZE];
             int read = 0;
             // Receive response
             while ( true ) {
-                int valread = recv(sockfd, buffer + read, 8192, 0);
+                int valread = recv(sockfd, buffer + read, BUFFER_SIZE, 0);
                 if ( valread <= 0 ) {
                     break;
                 }
                 read += valread;
-                if ( read >= 8192 ) {
+                if ( read >= BUFFER_SIZE ) {
                     cout << "WE NEED BIGGER BUFFER\n";
                     break;
                 }
-
                 // If we found EOF, we can get the content length
                 if ( strstr(buffer, "\r\n\r\n") != NULL ) {
                     if ( strstr(buffer, "Content-Length:") != NULL ) {
@@ -326,15 +321,13 @@ class Connection {
                     }
                 }
             }
-            memset(buffer + read, 0, 8192 - read);
+            memset(buffer + read, 0, BUFFER_SIZE - read);
             HTTP_Reply parser(buffer);
             close(sockfd);
             // Server cant keep up? Lets contribute to the server load
             while ( parser.is_internal_error() ) {
-                // cout << "Internal server thing, retrying...\n";
                 parser = send();
             }
-            // cout << "Response:\n" << buffer << "\n";
             return parser;
         }
 } ;
@@ -384,7 +377,8 @@ private:
 
     void handle_reply(HTTP_Reply& reply, const string& success_msg, function<void()> on_success = nullptr) {
         if (reply.is_success()) {
-            cout << success_msg << "\n";
+            if ( success_msg != "" )
+                cout << success_msg << "\n";
             if (on_success)
                 on_success();
         } else {
@@ -515,11 +509,12 @@ private:
 
     void get_collection_by_id(int id) {
         HTTP_Reply reply = c.prepare_send(json(), "/api/v1/tema/library/collections/" + to_string(id), "GET").send();
-        handle_reply(reply, "SUCCES: detalii colectie", [this, &reply]() {
+        handle_reply(reply, "", [this, &reply]() {
             json data = reply.get_data();
-            cout << "title: " << data["title"].get<string>() << "\n";
-            cout << "owner: " << data["owner"].get<string>() << "\n";
-            cout << reply.process_data_for_each("movies", print_id_title) << "\n";
+            // Checker is good and throws error sometimes if this isnt in one cout
+            cout << "SUCCES: detalii colectie\n title: " + data["title"].get<string>() + "\n" +
+            "owner: " + data["owner"].get<string>() + "\n" +
+            reply.process_data_for_each("movies", print_id_title) + "\n";
         });
     }
 
