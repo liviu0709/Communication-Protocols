@@ -62,10 +62,10 @@ class HTTP_Reply {
             if ( pos != string::npos ) {
                 // Valid HTTP response
                 // +4 bcz of \r\n\r\n
-                data = json::parse(response.substr(pos + 4));
-            } else {
-                cout << "ERROR: Invalid HTTP response\n";
-                exit(1);
+                try {
+                    data = json::parse(response.substr(pos + 4));
+                } catch ( json::parse_error& e ) {
+                }
             }
         }
 
@@ -540,7 +540,7 @@ private:
             HTTP_Reply reply2 = c.prepare_send(j, "/api/v1/tema/library/collections/" + collection_id + "/movies", "POST").send();
             if ( !reply2.is_success() ) {
                 cout << reply2.get_message() << "\n";
-                i--;
+                return;
             }
         }
         get_collection_by_id(stoi(collection_id));
@@ -553,16 +553,16 @@ private:
     }
 
     void add_movie_to_collection() {
-        int id = get_input_number<int>("id=");
-        string collection_id = to_string(get_input_number<int>("collectionId="));
+        int id = get_input_number<int>("movie_id=");
+        string collection_id = to_string(get_input_number<int>("collection_id="));
         json j = {{"id", id}};
         HTTP_Reply reply = c.prepare_send(j, "/api/v1/tema/library/collections/" + collection_id + "/movies", "POST").send();
         handle_reply(reply, "SUCCES: Film adaugat in colectie");
     }
 
     void delete_movie_from_collection() {
-        string id = to_string(get_input_number<int>("id="));
-        string collection_id = to_string(get_input_number<int>("collectionId="));
+        string id = to_string(get_input_number<int>("movie_id="));
+        string collection_id = to_string(get_input_number<int>("collection_id="));
         HTTP_Reply reply = c.prepare_send(json(), "/api/v1/tema/library/collections/" + collection_id + "/movies/" + id, "DELETE").send();
         handle_reply(reply, "SUCCES: Film sters din colectie");
     }
