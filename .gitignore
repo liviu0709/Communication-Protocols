@@ -1,0 +1,30 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+# C extensions
+*.so
+
+# Distribution / packaging
+dist/
+eggs/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+*.log
+*.pot
+
+# IDE Projects
+.project
+.pydevproject
+.idea/
+.vscode/
+.ropeproject
+
+.venv
+/checker/.env
+/checker/.venv/
+client
